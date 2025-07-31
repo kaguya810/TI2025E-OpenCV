@@ -10,5 +10,5 @@ controller.servoset(servonum=4, angle=1023)
 # 保持2秒
 time.sleep(8)
 # 释放舵机
-controller.servo_release(servonum=0)
-controller.servo_release(servonum=1)
+controller.servo_release(servonum=3)
+controller.servo_release(servonum=4)
