@@ -7,6 +7,90 @@ import threading
 import sys
 import select
 from collections import deque
+from math import pi, isnan
+
+# PID控制器类
+class PID:
+    def __init__(self, p=0.0, i=0.0, d=0.0, imax=0.0):
+        """
+        PID控制器初始化
+        :param p: 比例系数
+        :param i: 积分系数
+        :param d: 微分系数
+        :param imax: 积分限幅值(绝对值)
+        """
+        self._kp = float(p)
+        self._ki = float(i)
+        self._kd = float(d)
+        self._imax = abs(imax)
+        self.reset()
+    
+    def reset(self):
+        """重置控制器内部状态"""
+        self._integrator = 0.0
+        self._last_error = 0.0
+        self._last_derivative = float('nan')
+        self._last_t = 0
+    
+    def get_pid(self, error, scaler=1.0):
+        """
+        计算PID输出
+        :param error: 当前误差值
+        :param scaler: 输出缩放因子
+        :return: PID控制量
+        """
+        tnow = time.time() * 1000  # 转换为毫秒时间戳
+        dt = tnow - self._last_t
+        
+        # 异常时间间隔处理
+        if self._last_t == 0 or dt > 1000:
+            dt = 0
+            self.reset()
+        
+        self._last_t = tnow
+        delta_time = dt / 1000.0  # 转换为秒
+        
+        # 比例项
+        output = error * self._kp
+        
+        # 微分项(带低通滤波)
+        if abs(self._kd) > 0 and dt > 0:
+            if isnan(self._last_derivative):
+                # 首次计算时初始化
+                derivative = 0.0
+                self._last_derivative = 0.0
+            else:
+                # 计算原始微分值
+                derivative = (error - self._last_error) / delta_time
+            
+            # 应用一阶低通滤波(RC=1/(2π*20))
+            RC = 1 / (2 * pi * 20)
+            derivative = self._last_derivative + (
+                (delta_time / (RC + delta_time)) * 
+                (derivative - self._last_derivative)
+            )
+            
+            self._last_error = error
+            self._last_derivative = derivative
+            output += self._kd * derivative
+        
+        # 应用输出缩放
+        output *= scaler
+        
+        # 积分项(带限幅)
+        if abs(self._ki) > 0 and dt > 0:
+            # 积分项单独缩放
+            self._integrator += (error * self._ki) * scaler * delta_time
+            
+            # 积分限幅
+            if self._integrator < -self._imax:
+                self._integrator = -self._imax
+            elif self._integrator > self._imax:
+                self._integrator = self._imax
+                
+            output += self._integrator
+        
+        return output
 
 # 可调检测参数（全局变量）
 class DetectionParams:
@@ -15,7 +99,7 @@ class DetectionParams:
         self.min_area = 3320         # 最小轮廓面积
         self.min_rectangularity = 0.7  # 最小矩形度（轮廓面积/最小外接矩形面积）
         self.max_aspect_ratio = 5.0   # 最大长宽比（长边/短边）
-        self.distance_weight = 0.5    # 位置连续性权重
+        self.distance_weight = 0.3    # 位置连续性权重
         
         # 高级参数
         self.adaptive_block_size = 11  # 自适应阈值块大小
@@ -28,6 +112,27 @@ class DetectionParams:
 
 # 创建参数实例
 detection_params = DetectionParams()
+
+# PID控制器参数
+class PIDParams:
+    def __init__(self):
+        # 水平方向PID参数
+        self.pan_kp = 1
+        self.pan_ki = 0.0
+        self.pan_kd = 0.0
+        self.pan_imax = 100
+        
+        # 垂直方向PID参数
+        self.tilt_kp = 1
+        self.tilt_ki = 0.0
+        self.tilt_kd = 0.0
+        self.tilt_imax = 100
+        
+        # 输出缩放因子
+        self.output_scaler = 1.0
+
+# 创建PID参数实例
+pid_params = PIDParams()
 
 # 卡尔曼滤波器类
 class KalmanFilter:
@@ -134,6 +239,21 @@ prev_center = None
 frame_queue = deque(maxlen=3)
 trail_image = None
 
+# 初始化PID控制器
+pan_pid = PID(
+    p=pid_params.pan_kp, 
+    i=pid_params.pan_ki, 
+    d=pid_params.pan_kd, 
+    imax=pid_params.pan_imax
+)
+
+tilt_pid = PID(
+    p=pid_params.tilt_kp, 
+    i=pid_params.tilt_ki, 
+    d=pid_params.tilt_kd, 
+    imax=pid_params.tilt_imax
+)
+
 def input_listener():
     """监听键盘输入"""
     global stop_sending
@@ -147,17 +267,47 @@ def input_listener():
         except:
             break
 
-def send_serial_data(offset_x, offset_y, detected):
-    """通过串口发送偏移量数据"""
+def send_serial_data(pan_output, tilt_output, detected):
+    """通过串口发送PID输出数据"""
     global serial_port
     if serial_port and serial_port.is_open:
         try:
-            data = struct.pack('<hhbb', 
-                               int(offset_x),
-                               int(offset_y),
-                               1 if detected else 0,
-                               0x5B)
+            # 将PID输出转换为整数
+            pan_int = int(pan_output)
+            tilt_int = int(tilt_output)
+            
+            # 强行限制输出范围，仅仅指示水平舵机运动方向
+            if pan_int < -(10/0.13):
+                pan_int = 4
+            elif pan_int > (10/0.13):
+                pan_int = 2
+            elif pan_int > (0.92/0.13):
+                pan_int = 1
+            elif pan_int < -(0.92/0.13):
+                pan_int = 3
+            else:
+                pan_int = 0
+
+            # 强行限制输出范围，仅仅指示垂直舵机运动方向
+            if tilt_int < -(10/0.13):
+                tilt_int = 4
+            elif tilt_int > (10/0.13):
+                tilt_int = 2
+            elif tilt_int > (0.92/0.13):
+                tilt_int = 1
+            elif tilt_int < -(0.92/0.13):
+                tilt_int = 3
+            else:
+                tilt_int = 0    
+
+            # 帧结构: 水平输出(2字节), 垂直输出(2字节), 检测标志(1字节), 帧尾(0x5B)
+            data = struct.pack('<bbb', 
+                               pan_int,    # 水平PID输出
+                               tilt_int,   # 垂直PID输出
+                               0x5B)       # 帧尾
             serial_port.write(data)
+            print(f"发送数据: Pan: {pan_int}, Tilt: {tilt_int}, Detected: {detected}")
+            time.sleep(0.01)  # 确保数据发送间隔
         except Exception as e:
             print(f"串口发送错误: {e}")
 
@@ -218,7 +368,15 @@ PARAM_STEP = {
     'adaptive_block_size': 2,
     'adaptive_c': 1,
     'morph_kernel_size': 1,
-    'gaussian_blur_size': 2
+    'gaussian_blur_size': 2,
+    # PID参数步长
+    'pan_kp': 0.01,
+    'pan_ki': 0.001,
+    'pan_kd': 0.005,
+    'tilt_kp': 0.01,
+    'tilt_ki': 0.001,
+    'tilt_kd': 0.005,
+    'output_scaler': 0.1
 }
 
 try:
@@ -274,7 +432,7 @@ try:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(display_img, f"Proc: {avg_process_time:.1f}ms", (10, 60), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
+    
         # 显示当前参数值（如果开启）
         if detection_params.show_params:
             y_offset = 90
@@ -286,6 +444,20 @@ try:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
             cv2.putText(display_img, f"Dist Weight: {detection_params.distance_weight:.1f}", (10, y_offset+75), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+            
+            # 显示PID参数
+            cv2.putText(display_img, f"Pan Kp: {pid_params.pan_kp:.3f}", (10, y_offset+100), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
+            cv2.putText(display_img, f"Pan Ki: {pid_params.pan_ki:.3f}", (10, y_offset+125), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
+            cv2.putText(display_img, f"Pan Kd: {pid_params.pan_kd:.3f}", (10, y_offset+150), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
+            cv2.putText(display_img, f"Tilt Kp: {pid_params.tilt_kp:.3f}", (10, y_offset+175), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
+            cv2.putText(display_img, f"Tilt Ki: {pid_params.tilt_ki:.3f}", (10, y_offset+200), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
+            cv2.putText(display_img, f"Tilt Kd: {pid_params.tilt_kd:.3f}", (10, y_offset+225), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
         
         # 绘制中心点
         cv2.circle(display_img, img_center, 5, (0, 0, 255), -1)
@@ -308,21 +480,32 @@ try:
             if contour is not None:
                 cv2.drawContours(display_img, [contour], -1, (0, 255, 0), 2)
             
+            # 计算偏移量
             offset_x = filtered_point[0] - img_center[0]
             offset_y = filtered_point[1] - img_center[1]
             
+            # PID计算
+            pan_output = pan_pid.get_pid(offset_x, pid_params.output_scaler)
+            tilt_output = tilt_pid.get_pid(offset_y, pid_params.output_scaler)
+
             print("\033c", end="")
             print(f"=== 实时检测结果 (FPS: {fps:.1f}) ===")
             print(f"矩形中心坐标: ({filtered_point[0]}, {filtered_point[1]})")
             print(f"中心偏移量: X: {offset_x}, Y: {offset_y}")
+            print(f"PID输出: Pan: {pan_output:.1f}, Tilt: {tilt_output:.1f}")
             print(f"处理延迟: {avg_process_time:.1f}ms")
             print("=" * 40)
             
             send_counter += 1
             if send_counter >= send_interval:
-                send_serial_data(offset_x, offset_y, True)
+                # 发送PID输出值
+                send_serial_data(pan_output, tilt_output, True)
                 send_counter = 0
         else:
+            # 未检测到矩形时重置PID控制器
+            pan_pid.reset()
+            tilt_pid.reset()
+            
             print("\033c", end="")
             print(f"=== 实时检测结果 (FPS: {fps:.1f}) ===")
             print("未检测到黑色矩形")
@@ -332,6 +515,7 @@ try:
             trail_image = None
             send_counter += 1
             if send_counter >= send_interval:
+                # 发送零值
                 send_serial_data(0, 0, False)
                 send_counter = 0
         
@@ -359,13 +543,20 @@ try:
             print("5/6: 增加/减少最大长宽比")
             print("7/8: 增加/减少位置权重")
             print("9/0: 增加/减少形态学核大小")
+            print("a/s: 增加/减少水平比例系数(Kp)")
+            print("d/f: 增加/减少水平积分系数(Ki)")
+            print("g/h: 增加/减少水平微分系数(Kd)")
+            print("z/x: 增加/减少垂直比例系数(Kp)")
+            print("c/v: 增加/减少垂直积分系数(Ki)")
+            print("b/n: 增加/减少垂直微分系数(Kd)")
+            print("m/,: 增加/减少输出缩放因子")
             print("h: 显示此帮助")
             print("=======================")
         elif key == ord('p'):  # 显示/隐藏参数
             detection_params.show_params = not detection_params.show_params
             print(f"参数显示: {'开启' if detection_params.show_params else '关闭'}")
         
-        # 参数调整快捷键
+        # 检测参数调整快捷键
         elif key == ord('1'):  # 增加最小面积
             detection_params.min_area += PARAM_STEP['min_area']
             print(f"最小面积: {detection_params.min_area}")
@@ -396,6 +587,62 @@ try:
         elif key == ord('0'):  # 减少形态学核大小
             detection_params.morph_kernel_size = max(1, detection_params.morph_kernel_size - PARAM_STEP['morph_kernel_size'])
             print(f"形态学核大小: {detection_params.morph_kernel_size}")
+            
+        # PID参数调整快捷键
+        elif key == ord('a'):  # 增加水平比例系数
+            pid_params.pan_kp += PARAM_STEP['pan_kp']
+            pan_pid = PID(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
+            print(f"水平比例系数(Kp): {pid_params.pan_kp:.3f}")
+        elif key == ord('s'):  # 减少水平比例系数
+            pid_params.pan_kp = max(0, pid_params.pan_kp - PARAM_STEP['pan_kp'])
+            pan_pid = PID(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
+            print(f"水平比例系数(Kp): {pid_params.pan_kp:.3f}")
+        elif key == ord('d'):  # 增加水平积分系数
+            pid_params.pan_ki += PARAM_STEP['pan_ki']
+            pan_pid = PID(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
+            print(f"水平积分系数(Ki): {pid_params.pan_ki:.3f}")
+        elif key == ord('f'):  # 减少水平积分系数
+            pid_params.pan_ki = max(0, pid_params.pan_ki - PARAM_STEP['pan_ki'])
+            pan_pid = PID(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
+            print(f"水平积分系数(Ki): {pid_params.pan_ki:.3f}")
+        elif key == ord('g'):  # 增加水平微分系数
+            pid_params.pan_kd += PARAM_STEP['pan_kd']
+            pan_pid = PID(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
+            print(f"水平微分系数(Kd): {pid_params.pan_kd:.3f}")
+        elif key == ord('h'):  # 减少水平微分系数
+            pid_params.pan_kd = max(0, pid_params.pan_kd - PARAM_STEP['pan_kd'])
+            pan_pid = PID(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
+            print(f"水平微分系数(Kd): {pid_params.pan_kd:.3f}")
+        elif key == ord('z'):  # 增加垂直比例系数
+            pid_params.tilt_kp += PARAM_STEP['tilt_kp']
+            tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
+            print(f"垂直比例系数(Kp): {pid_params.tilt_kp:.3f}")
+        elif key == ord('x'):  # 减少垂直比例系数
+            pid_params.tilt_kp = max(0, pid_params.tilt_kp - PARAM_STEP['tilt_kp'])
+            tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
+            print(f"垂直比例系数(Kp): {pid_params.tilt_kp:.3f}")
+        elif key == ord('c'):  # 增加垂直积分系数
+            pid_params.tilt_ki += PARAM_STEP['tilt_ki']
+            tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
+            print(f"垂直积分系数(Ki): {pid_params.tilt_ki:.3f}")
+        elif key == ord('v'):  # 减少垂直积分系数
+            pid_params.tilt_ki = max(0, pid_params.tilt_ki - PARAM_STEP['tilt_ki'])
+            tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
+            print(f"垂直积分系数(Ki): {pid_params.tilt_ki:.3f}")
+        elif key == ord('b'):  # 增加垂直微分系数
+            pid_params.tilt_kd += PARAM_STEP['tilt_kd']
+            tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
+            print(f"垂直微分系数(Kd): {pid_params.tilt_kd:.3f}")
+        elif key == ord('n'):  # 减少垂直微分系数
+            pid_params.tilt_kd = max(0, pid_params.tilt_kd - PARAM_STEP['tilt_kd'])
+            tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
+            print(f"垂直微分系数(Kd): {pid_params.tilt_kd:.3f}")
+        elif key == ord('m'):  # 增加输出缩放因子
+            pid_params.output_scaler += PARAM_STEP['output_scaler']
+            print(f"输出缩放因子: {pid_params.output_scaler:.1f}")
+        elif key == ord(','):  # 减少输出缩放因子
+            pid_params.output_scaler = max(0.1, pid_params.output_scaler - PARAM_STEP['output_scaler'])
+            print(f"输出缩放因子: {pid_params.output_scaler:.1f}")
 
 finally:
     capture.release()
