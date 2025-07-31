@@ -10,14 +10,12 @@ def run_root_command(cmd: str, password: str):
     """
     通过sudo su获取root权限后执行命令
     """
-    proc = subprocess.run(f"echo {password} | sudo -S su -c \"{cmd}\"", 
-                          shell=True, 
-                          text=True, 
+    proc = subprocess.run(f"echo {password} | sudo -S su -c \"{cmd}\"",
+                          shell=True,
+                          text=True,
                           capture_output=True)
     if proc.returncode != 0:
-        print(f"[ERROR] 命令执行失败: {cmd}\n{proc.stderr}")
-    else:
-        print(f"[OK] {cmd}")
+        print(f"[ERROR] 命令执行失败:\n{proc.stderr}")
 
 
 def angle_to_duty_cycle(angle: int) -> int:
@@ -34,7 +32,7 @@ def pwm_control():
 
     # 用户输入
     pwmchip = input("请输入舵机编号 (对应 pwmchipX): ").strip() or "0"
-    pwm_channel = input("请输入PWM通道编号 (例如 0 表示 pwm0): ").strip() or "0"
+    pwm_channel = "0"  # 默认通道固定为0
     angle = int(input("请输入舵机角度 (0-1023): ").strip() or "512")
     duty_cycle = angle_to_duty_cycle(angle)
     polarity = "normal"  # 固定为 normal
