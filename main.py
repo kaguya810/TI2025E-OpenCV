@@ -117,15 +117,15 @@ detection_params = DetectionParams()
 class PIDParams:
     def __init__(self):
         # 水平方向PID参数
-        self.pan_kp = 0.1
-        self.pan_ki = 0.01
-        self.pan_kd = 0.05
+        self.pan_kp = 1
+        self.pan_ki = 0.0
+        self.pan_kd = 0.0
         self.pan_imax = 100
         
         # 垂直方向PID参数
-        self.tilt_kp = 0.1
-        self.tilt_ki = 0.01
-        self.tilt_kd = 0.05
+        self.tilt_kp = 1
+        self.tilt_ki = 0.0
+        self.tilt_kd = 0.0
         self.tilt_imax = 100
         
         # 输出缩放因子
@@ -276,13 +276,38 @@ def send_serial_data(pan_output, tilt_output, detected):
             pan_int = int(pan_output)
             tilt_int = int(tilt_output)
             
-            # 帧结构: 帧头(0x2C, 0x12), 水平输出(2字节), 垂直输出(2字节), 检测标志(1字节), 帧尾(0x5B)
-            data = struct.pack('<hhbb', 
+            # 强行限制输出范围，仅仅指示水平舵机运动方向
+            if pan_int < -(10/0.13):
+                pan_int = 4
+            elif pan_int > (10/0.13):
+                pan_int = 2
+            elif pan_int > (0.92/0.13):
+                pan_int = 1
+            elif pan_int < -(0.92/0.13):
+                pan_int = 3
+            else:
+                pan_int = 0
+
+            # 强行限制输出范围，仅仅指示垂直舵机运动方向
+            if tilt_int < -(10/0.13):
+                tilt_int = 4
+            elif tilt_int > (10/0.13):
+                tilt_int = 2
+            elif tilt_int > (0.92/0.13):
+                tilt_int = 1
+            elif tilt_int < -(0.92/0.13):
+                tilt_int = 3
+            else:
+                tilt_int = 0    
+
+            # 帧结构: 水平输出(2字节), 垂直输出(2字节), 检测标志(1字节), 帧尾(0x5B)
+            data = struct.pack('<bbb', 
                                pan_int,    # 水平PID输出
                                tilt_int,   # 垂直PID输出
-                               1 if detected else 0,  # 检测标志
                                0x5B)       # 帧尾
             serial_port.write(data)
+            print(f"发送数据: Pan: {pan_int}, Tilt: {tilt_int}, Detected: {detected}")
+            time.sleep(0.01)  # 确保数据发送间隔
         except Exception as e:
             print(f"串口发送错误: {e}")
 
@@ -407,7 +432,7 @@ try:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(display_img, f"Proc: {avg_process_time:.1f}ms", (10, 60), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
+    
         # 显示当前参数值（如果开启）
         if detection_params.show_params:
             y_offset = 90
