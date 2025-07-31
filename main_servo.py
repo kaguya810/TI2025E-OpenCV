@@ -8,6 +8,8 @@ from collections import deque
 from math import pi, isnan
 from PWM import ServoController  # 导入舵机控制模块
 
+tilt_value = 512  # 垂直舵机初始值
+
 # PID控制器类
 class PID:
     def __init__(self, p=0.0, i=0.0, d=0.0, imax=0.0):
@@ -116,13 +118,13 @@ detection_params = DetectionParams()
 class PIDParams:
     def __init__(self):
         # 水平方向PID参数
-        self.pan_kp = 1
+        self.pan_kp = 4
         self.pan_ki = 0.0
         self.pan_kd = 0.0
         self.pan_imax = 100
         
         # 垂直方向PID参数
-        self.tilt_kp = 1
+        self.tilt_kp = 10
         self.tilt_ki = 0.0
         self.tilt_kd = 0.0
         self.tilt_imax = 100
@@ -274,6 +276,7 @@ def input_listener():
 def control_servos(pan_output, tilt_output, detected):
     """控制舵机运动"""
     try:
+        global tilt_value
         # 水平舵机(连续舵机)控制
         # 将PID输出映射到PWM范围(0-1023)
         # 水平舵机: 0-1023对应不同旋转方向和速度
@@ -283,8 +286,8 @@ def control_servos(pan_output, tilt_output, detected):
         # 垂直舵机(180度舵机)控制
         # 将PID输出映射到角度范围(0-180度对应PWM值)
         # 假设512对应90度，每个角度单位约2.25个PWM单位
-        tilt_value = int(512 + tilt_output * 0.2)  # 调整系数使输出在合理范围
-        tilt_value = max(0, min(1023, tilt_value))  # 限制在有效范围
+        tilt_value = int(tilt_value + tilt_output * 0.2)  # 调整系数使输出在合理范围
+        tilt_value = max(256, min(768, tilt_value))  # 限制在有效范围
         
         # 设置舵机
         controller.servoset(servonum=3, angle=pan_value)   # 水平舵机
@@ -347,9 +350,14 @@ def set_camera_prop(cap, prop, value):
             print(f"警告: 无法设置属性{prop}为{value}，实际值为{actual_value}")
 
 # 设置摄像头参数
-set_camera_prop(capture, cv2.CAP_PROP_FRAME_WIDTH, 640)
-set_camera_prop(capture, cv2.CAP_PROP_FRAME_HEIGHT, 480)
-set_camera_prop(capture, cv2.CAP_PROP_FPS, 30)  # 降低FPS要求以提高兼容性
+capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+capture.set(cv2.CAP_PROP_FPS, 60)
+capture.set(cv2.CAP_PROP_AUTO_WB, 0)
+capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+capture.set(cv2.CAP_PROP_EXPOSURE, -4)
+capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
 
 # 性能监控
 frame_count = 0
