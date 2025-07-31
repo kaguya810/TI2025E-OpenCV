@@ -12,7 +12,7 @@ from collections import deque
 class DetectionParams:
     def __init__(self):
         # 基本参数
-        self.min_area = 100         # 最小轮廓面积
+        self.min_area = 3320         # 最小轮廓面积
         self.min_rectangularity = 0.7  # 最小矩形度（轮廓面积/最小外接矩形面积）
         self.max_aspect_ratio = 5.0   # 最大长宽比（长边/短边）
         self.distance_weight = 0.5    # 位置连续性权重
