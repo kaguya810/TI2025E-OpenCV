@@ -6,59 +6,139 @@ import struct
 import threading
 import sys
 import select
+from collections import deque
 
-def find_black_rectangle_center(thresh):
-    """在帧中查找黑色矩形并返回其中心点坐标"""
-    # 查找轮廓
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+# 可调检测参数（全局变量）
+class DetectionParams:
+    def __init__(self):
+        # 基本参数
+        self.min_area = 100         # 最小轮廓面积
+        self.min_rectangularity = 0.7  # 最小矩形度（轮廓面积/最小外接矩形面积）
+        self.max_aspect_ratio = 5.0   # 最大长宽比（长边/短边）
+        self.distance_weight = 0.5    # 位置连续性权重
+        
+        # 高级参数
+        self.adaptive_block_size = 11  # 自适应阈值块大小
+        self.adaptive_c = 2            # 自适应阈值常数
+        self.morph_kernel_size = 3     # 形态学操作核大小
+        self.gaussian_blur_size = 5    # 高斯模糊核大小
+        
+        # 状态标志
+        self.show_params = False       # 是否显示参数值
+
+# 创建参数实例
+detection_params = DetectionParams()
+
+# 卡尔曼滤波器类
+class KalmanFilter:
+    def __init__(self, process_noise=1e-5, measurement_noise=1e-1):
+        self.kf = cv2.KalmanFilter(4, 2)
+        self.kf.measurementMatrix = np.array([[1,0,0,0],[0,1,0,0]], np.float32)
+        self.kf.transitionMatrix = np.array([[1,0,1,0],[0,1,0,1],[0,0,1,0],[0,0,0,1]], np.float32)
+        self.kf.processNoiseCov = np.eye(4, dtype=np.float32) * process_noise
+        self.kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * measurement_noise
+        self.kf.errorCovPost = np.eye(4, dtype=np.float32)
+        self.predicted = None
+        
+    def predict(self, pt):
+        if pt is None:
+            return None
+            
+        if self.predicted is None:
+            self.kf.statePost = np.array([[pt[0]], [pt[1]], [0], [0]], dtype=np.float32)
+            
+        self.kf.predict()
+        measurement = np.array([[np.float32(pt[0])], [np.float32(pt[1])]])
+        self.kf.correct(measurement)
+        prediction = self.kf.statePost
+        self.predicted = (int(prediction[0]), int(prediction[1]))
+        return self.predicted
+
+def find_black_rectangle_center(thresh, prev_center=None):
+    """优化后的矩形检测函数，支持参数调整"""
+    # 使用自适应阈值
+    adaptive_thresh = cv2.adaptiveThreshold(
+        thresh, 255, 
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+        cv2.THRESH_BINARY_INV, 
+        detection_params.adaptive_block_size, 
+        detection_params.adaptive_c
+    )
     
-    # 寻找最大矩形轮廓
-    max_rect = None
-    max_area = 0
+    # 形态学操作
+    kernel = np.ones((detection_params.morph_kernel_size, detection_params.morph_kernel_size), np.uint8)
+    morphed = cv2.morphologyEx(adaptive_thresh, cv2.MORPH_CLOSE, kernel)
+    morphed = cv2.dilate(morphed, kernel, iterations=1)
+    
+    # 查找轮廓
+    contours, _ = cv2.findContours(morphed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        return None, None
+    
+    # 寻找最佳候选轮廓
+    best_contour = None
+    max_score = 0
+    
     for cnt in contours:
-        # 计算轮廓面积
         area = cv2.contourArea(cnt)
-        if area < 100:  # 忽略小面积噪声
+        if area < detection_params.min_area:  # 使用可调最小面积
             continue
             
-        # 多边形逼近
-        peri = cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+        # 计算矩形属性
+        rect = cv2.minAreaRect(cnt)
+        width, height = rect[1]
+        if min(width, height) == 0:
+            continue
+            
+        aspect_ratio = max(width, height) / min(width, height)
+        rectangularity = area / (width * height)
         
-        # 检查是否为四边形
-        if len(approx) == 4:
-            # 检查凸性
-            if cv2.isContourConvex(approx):
-                if area > max_area:
-                    max_area = area
-                    max_rect = approx
+        # 应用参数阈值
+        if aspect_ratio > detection_params.max_aspect_ratio:
+            continue
+        if rectangularity < detection_params.min_rectangularity:
+            continue
+        
+        # 综合评分
+        score = area + rectangularity * 100 + (1 / aspect_ratio) * 50
+        
+        # 位置连续性评分
+        if prev_center:
+            M = cv2.moments(cnt)
+            if M["m00"] != 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                distance = np.sqrt((cX - prev_center[0])**2 + (cY - prev_center[1])**2)
+                distance_score = max(0, 100 - distance) * detection_params.distance_weight
+                score += distance_score
+        
+        if score > max_score:
+            max_score = score
+            best_contour = cnt
     
-    if max_rect is None:
-        return None
+    if best_contour is None:
+        return None, None
     
-    # 计算矩形的中心点
-    M = cv2.moments(max_rect)
-    if M["m00"] != 0:
-        cX = int(M["m10"] / M["m00"])
-        cY = int(M["m01"] / M["m00"])
-        return (cX, cY)
-    else:
-        # 如果无法计算矩心，使用四个点的平均值
-        points = max_rect.reshape(4, 2)
-        cX = int(np.mean(points[:, 0]))
-        cY = int(np.mean(points[:, 1]))
-        return (cX, cY)
+    # 使用最小外接矩形中心
+    rect = cv2.minAreaRect(best_contour)
+    center = (int(rect[0][0]), int(rect[0][1]))
+    
+    return center, best_contour
 
-# 全局变量，控制发送循环
+# 全局变量
 stop_sending = False
 serial_port = None
+kalman_filter = KalmanFilter(process_noise=1e-4, measurement_noise=1e-2)
+prev_center = None
+frame_queue = deque(maxlen=3)
+trail_image = None
 
 def input_listener():
-    """监听键盘输入，如果输入 'q' 则停止发送"""
+    """监听键盘输入"""
     global stop_sending
     while not stop_sending:
         try:
-            # 非阻塞方式检查输入
             if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
                 user_input = sys.stdin.read(1)
                 if user_input.lower() == 'q':
@@ -72,31 +152,26 @@ def send_serial_data(offset_x, offset_y, detected):
     global serial_port
     if serial_port and serial_port.is_open:
         try:
-            # 帧结构: 帧头(0x2C, 0x12), 偏移量X(2字节), 偏移量Y(2字节), 检测标志(1字节), 保留位(1字节), 帧尾(0x5B)
-            # 使用小端字节序打包数据
             data = struct.pack('<hhbb', 
-                               int(offset_x),  # X偏移量
-                               int(offset_y),  # Y偏移量
-                               1 if detected else 0,  # 检测标志
-                               0x5B)  # 帧尾
+                               int(offset_x),
+                               int(offset_y),
+                               1 if detected else 0,
+                               0x5B)
             serial_port.write(data)
-            # print(f"发送数据: X={offset_x}, Y={offset_y}, 检测={detected}")
         except Exception as e:
             print(f"串口发送错误: {e}")
 
 # 初始化串口
 try:
-    # 请根据实际情况修改串口号
-    # Windows: 'COM3', Linux: '/dev/ttyUSB0'
     serial_port = serial.Serial(
-        port='/dev/ttyUSB0',  # 修改为你的串口号
-        baudrate=9600,
+        port='/dev/ttyUSB0',
+        baudrate=115200,
         bytesize=serial.EIGHTBITS,
         parity=serial.PARITY_NONE,
         stopbits=serial.STOPBITS_ONE,
-        timeout=0.1
+        timeout=0.05
     )
-    time.sleep(1)  # 等待串口初始化
+    time.sleep(1)
     print(f"串口 {serial_port.port} 已打开，波特率 {serial_port.baudrate}")
 except Exception as e:
     print(f"无法打开串口: {e}")
@@ -111,140 +186,218 @@ try:
 except:
     print("无法启动输入监听线程")
 
-# 初始化摄像头捕获
+# 初始化摄像头
 capture = cv2.VideoCapture(0)
-
-# 检查摄像头是否成功打开
 if not capture.isOpened():
     print("无法访问摄像头！")
     exit()
 
-# 关闭自动设置
-capture.set(cv2.CAP_PROP_AUTO_WB, 0)       # 关闭自动白平衡
-capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # 手动曝光模式
-capture.set(cv2.CAP_PROP_EXPOSURE, -4)     # 曝光值（根据实际环境调整）
+# 设置摄像头参数
+capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+capture.set(cv2.CAP_PROP_FPS, 60)
+capture.set(cv2.CAP_PROP_AUTO_WB, 0)
+capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+capture.set(cv2.CAP_PROP_EXPOSURE, -4)
+capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-# 帧率计算变量
+# 性能监控
 frame_count = 0
 start_time = time.time()
 fps = 0
-
-# 创建用于绘制轨迹的空白图像
-trail_image = None
-
-# 发送计数器（控制发送频率）
+processing_times = deque(maxlen=30)
 send_counter = 0
-send_interval = 2  # 每2帧发送一次数据
+send_interval = 2
+
+# 参数调整步长
+PARAM_STEP = {
+    'min_area': 10,
+    'min_rectangularity': 0.05,
+    'max_aspect_ratio': 0.5,
+    'distance_weight': 0.1,
+    'adaptive_block_size': 2,
+    'adaptive_c': 1,
+    'morph_kernel_size': 1,
+    'gaussian_blur_size': 2
+}
 
 try:
     while capture.isOpened() and not stop_sending:
-        # 读取帧
         retval, frame = capture.read()
-
         if not retval:
-            print("无法获取帧！")
-            break
+            continue
             
-        # 转换为灰度图
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        frame_queue.append(frame)
+        if len(frame_queue) < frame_queue.maxlen:
+            continue
+            
+        process_frame = frame_queue.popleft()
+        process_start = time.time()
         
-        # 使用Canny边缘检测
-        thresh = cv2.Canny(gray, 75, 200)
+        # 预处理
+        gray = cv2.cvtColor(process_frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, 
+                               (detection_params.gaussian_blur_size, detection_params.gaussian_blur_size), 
+                               0)
         
-        # 查找黑色矩形中心
-        center_point = find_black_rectangle_center(thresh)
+        # 检测矩形
+        center_point, contour = find_black_rectangle_center(gray, prev_center)
         
-        # 计算帧率
+        # 应用卡尔曼滤波
+        filtered_point = None
+        if center_point:
+            filtered_point = kalman_filter.predict(center_point)
+            prev_center = filtered_point
+        else:
+            if kalman_filter.predicted:
+                filtered_point = kalman_filter.predicted
+        
+        # 计算性能指标
+        process_time = (time.time() - process_start) * 1000
+        processing_times.append(process_time)
+        avg_process_time = sum(processing_times) / len(processing_times) if processing_times else 0
+        
         frame_count += 1
         elapsed_time = time.time() - start_time
-        if elapsed_time > 1:  # 每秒更新一次帧率
+        if elapsed_time > 1:
             fps = frame_count / elapsed_time
             frame_count = 0
             start_time = time.time()
         
-        # 创建用于显示的彩色图像
-        display_img = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
-        
-        # 获取图像中心
+        # 创建显示图像
+        display_img = process_frame.copy()
         height, width = display_img.shape[:2]
         img_center = (width // 2, height // 2)
         
-        # 在图像上显示帧率
+        # 显示性能信息
         cv2.putText(display_img, f"FPS: {fps:.1f}", (10, 30), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(display_img, f"Proc: {avg_process_time:.1f}ms", (10, 60), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
-        # 绘制图像中心点
+        # 显示当前参数值（如果开启）
+        if detection_params.show_params:
+            y_offset = 90
+            cv2.putText(display_img, f"Min Area: {detection_params.min_area}", (10, y_offset), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+            cv2.putText(display_img, f"Min Rect: {detection_params.min_rectangularity:.2f}", (10, y_offset+25), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+            cv2.putText(display_img, f"Max Aspect: {detection_params.max_aspect_ratio:.1f}", (10, y_offset+50), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+            cv2.putText(display_img, f"Dist Weight: {detection_params.distance_weight:.1f}", (10, y_offset+75), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+        
+        # 绘制中心点
         cv2.circle(display_img, img_center, 5, (0, 0, 255), -1)
-        cv2.putText(display_img, "Center", (img_center[0] + 10, img_center[1] - 10), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
         
-        # 如果找到矩形中心
-        if center_point is not None:
-            # 初始化轨迹图像
+        # 如果找到矩形
+        if filtered_point is not None:
             if trail_image is None:
                 trail_image = np.zeros_like(display_img)
             
-            # 在轨迹图像上添加当前点
-            cv2.circle(trail_image, center_point, 2, (0, 255, 255), -1)
-            
-            # 将轨迹叠加到显示图像上
+            cv2.circle(trail_image, filtered_point, 2, (0, 255, 255), -1)
             display_img = cv2.add(display_img, trail_image)
+            cv2.circle(display_img, filtered_point, 8, (255, 0, 0), -1)
             
-            # 绘制当前中心点
-            cv2.circle(display_img, center_point, 8, (255, 0, 0), -1)
-            
-            # 显示坐标
-            text = f"({center_point[0]}, {center_point[1]})"
-            cv2.putText(display_img, text, (center_point[0] + 10, center_point[1] - 10), 
+            text = f"({filtered_point[0]}, {filtered_point[1]})"
+            cv2.putText(display_img, text, (filtered_point[0] + 10, filtered_point[1] - 10), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
             
-            # 绘制到图像中心的连线
-            cv2.line(display_img, img_center, center_point, (0, 255, 0), 1)
+            cv2.line(display_img, img_center, filtered_point, (0, 255, 0), 1)
             
-            # 计算偏移量
-            offset_x = center_point[0] - img_center[0]
-            offset_y = center_point[1] - img_center[1]
+            if contour is not None:
+                cv2.drawContours(display_img, [contour], -1, (0, 255, 0), 2)
             
-            # 在终端打印中心点坐标和偏移量
-            print("\033c", end="")  # 清空终端
+            offset_x = filtered_point[0] - img_center[0]
+            offset_y = filtered_point[1] - img_center[1]
+            
+            print("\033c", end="")
             print(f"=== 实时检测结果 (FPS: {fps:.1f}) ===")
-            print(f"矩形中心坐标: ({center_point[0]}, {center_point[1]})")
+            print(f"矩形中心坐标: ({filtered_point[0]}, {filtered_point[1]})")
             print(f"中心偏移量: X: {offset_x}, Y: {offset_y}")
+            print(f"处理延迟: {avg_process_time:.1f}ms")
             print("=" * 40)
             
-            # 发送串口数据（控制发送频率）
             send_counter += 1
             if send_counter >= send_interval:
                 send_serial_data(offset_x, offset_y, True)
                 send_counter = 0
         else:
-            # 未检测到矩形时清屏并显示提示
-            print("\033c", end="")  # 清空终端
+            print("\033c", end="")
             print(f"=== 实时检测结果 (FPS: {fps:.1f}) ===")
             print("未检测到黑色矩形")
+            print(f"处理延迟: {avg_process_time:.1f}ms")
             print("=" * 40)
             
-            # 重置轨迹图像
             trail_image = None
-            
-            # 发送未检测到矩形的信号
             send_counter += 1
             if send_counter >= send_interval:
                 send_serial_data(0, 0, False)
                 send_counter = 0
         
         # 显示帧
-        cv2.imshow("Black Rectangle Center Detection", display_img)
+        cv2.imshow("Rectangle Detection (Press 'h' for help)", display_img)
         
-        # 按空格键退出（ASCII码32是空格键）
+        # 键盘控制
         key = cv2.waitKey(1)
-        if key == 32:  # 空格键
+        if key == 32:  # 空格键 - 退出
             stop_sending = True
-        elif key == ord('c'):  # 按'c'键清除轨迹
+        elif key == ord('c'):  # 清除轨迹
             trail_image = None
+        elif key == ord('r'):  # 重置卡尔曼滤波器
+            kalman_filter = KalmanFilter()
+            prev_center = None
+            print("卡尔曼滤波器已重置")
+        elif key == ord('h'):  # 显示帮助
+            print("\n===== 键盘控制帮助 =====")
+            print("空格键: 退出程序")
+            print("c: 清除轨迹")
+            print("r: 重置卡尔曼滤波器")
+            print("p: 显示/隐藏检测参数")
+            print("1/2: 增加/减少最小面积")
+            print("3/4: 增加/减少最小矩形度")
+            print("5/6: 增加/减少最大长宽比")
+            print("7/8: 增加/减少位置权重")
+            print("9/0: 增加/减少形态学核大小")
+            print("h: 显示此帮助")
+            print("=======================")
+        elif key == ord('p'):  # 显示/隐藏参数
+            detection_params.show_params = not detection_params.show_params
+            print(f"参数显示: {'开启' if detection_params.show_params else '关闭'}")
+        
+        # 参数调整快捷键
+        elif key == ord('1'):  # 增加最小面积
+            detection_params.min_area += PARAM_STEP['min_area']
+            print(f"最小面积: {detection_params.min_area}")
+        elif key == ord('2'):  # 减少最小面积
+            detection_params.min_area = max(10, detection_params.min_area - PARAM_STEP['min_area'])
+            print(f"最小面积: {detection_params.min_area}")
+        elif key == ord('3'):  # 增加最小矩形度
+            detection_params.min_rectangularity = min(0.95, detection_params.min_rectangularity + PARAM_STEP['min_rectangularity'])
+            print(f"最小矩形度: {detection_params.min_rectangularity:.2f}")
+        elif key == ord('4'):  # 减少最小矩形度
+            detection_params.min_rectangularity = max(0.1, detection_params.min_rectangularity - PARAM_STEP['min_rectangularity'])
+            print(f"最小矩形度: {detection_params.min_rectangularity:.2f}")
+        elif key == ord('5'):  # 增加最大长宽比
+            detection_params.max_aspect_ratio += PARAM_STEP['max_aspect_ratio']
+            print(f"最大长宽比: {detection_params.max_aspect_ratio:.1f}")
+        elif key == ord('6'):  # 减少最大长宽比
+            detection_params.max_aspect_ratio = max(1.0, detection_params.max_aspect_ratio - PARAM_STEP['max_aspect_ratio'])
+            print(f"最大长宽比: {detection_params.max_aspect_ratio:.1f}")
+        elif key == ord('7'):  # 增加位置权重
+            detection_params.distance_weight = min(1.0, detection_params.distance_weight + PARAM_STEP['distance_weight'])
+            print(f"位置权重: {detection_params.distance_weight:.1f}")
+        elif key == ord('8'):  # 减少位置权重
+            detection_params.distance_weight = max(0.0, detection_params.distance_weight - PARAM_STEP['distance_weight'])
+            print(f"位置权重: {detection_params.distance_weight:.1f}")
+        elif key == ord('9'):  # 增加形态学核大小
+            detection_params.morph_kernel_size = min(15, detection_params.morph_kernel_size + PARAM_STEP['morph_kernel_size'])
+            print(f"形态学核大小: {detection_params.morph_kernel_size}")
+        elif key == ord('0'):  # 减少形态学核大小
+            detection_params.morph_kernel_size = max(1, detection_params.morph_kernel_size - PARAM_STEP['morph_kernel_size'])
+            print(f"形态学核大小: {detection_params.morph_kernel_size}")
 
 finally:
-    # 确保资源被释放
     capture.release()
     cv2.destroyAllWindows()
     if serial_port and serial_port.is_open:
