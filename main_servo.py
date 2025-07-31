@@ -240,8 +240,8 @@ trail_image = None
 # 初始化舵机控制器
 controller = ServoController()
 # 设置舵机初始位置
-controller.servoset(servonum=0, angle=512)  # 水平舵机(连续舵机)初始中位
-controller.servoset(servonum=1, angle=512)  # 垂直舵机(180度舵机)初始中位
+controller.servoset(servonum=3, angle=512)  # 水平舵机(连续舵机)初始中位
+controller.servoset(servonum=4, angle=512)  # 垂直舵机(180度舵机)初始中位
 
 # 初始化PID控制器
 pan_pid = PID(
@@ -654,7 +654,7 @@ try:
 finally:
     if capture is not None and capture.isOpened():
         capture.release()
-    cv2.destroyAllWindows()
+    cv2.destroyAllWindows()           
     # 释放舵机
     controller.servo_release(servonum=3)
     controller.servo_release(servonum=4)
