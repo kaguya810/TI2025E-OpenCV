@@ -1,11 +1,11 @@
 import subprocess
 
-def run_sudo_command(cmd: str, password: str):
+def run_root_command(cmd: str, password: str):
     """
-    以sudo权限执行命令并自动传递密码
+    通过sudo su获取root权限后执行命令
     """
-    proc = subprocess.run(f"sudo -S {cmd}", 
-                          input=password + "\n", 
+    # 使用sudo su -c 执行root命令
+    proc = subprocess.run(f"echo {password} | sudo -S su -c \"{cmd}\"", 
                           shell=True, 
                           text=True, 
                           capture_output=True)
@@ -30,26 +30,25 @@ def pwm_control():
     print("\n=== 开始配置PWM ===")
 
     # 1. 导出PWM
-    run_sudo_command(f"echo {pwm_channel} > /sys/class/pwm/{pwmchip_path}/export", sudo_password)
+    run_root_command(f"echo {pwm_channel} > /sys/class/pwm/{pwmchip_path}/export", sudo_password)
 
     # 2. 设置周期
-    run_sudo_command(f"echo {period} > /sys/class/pwm/{pwmchip_path}/{pwm_path}/period", sudo_password)
+    run_root_command(f"echo {period} > /sys/class/pwm/{pwmchip_path}/{pwm_path}/period", sudo_password)
 
     # 3. 设置占空比
-    run_sudo_command(f"echo {duty_cycle} > /sys/class/pwm/{pwmchip_path}/{pwm_path}/duty_cycle", sudo_password)
+    run_root_command(f"echo {duty_cycle} > /sys/class/pwm/{pwmchip_path}/{pwm_path}/duty_cycle", sudo_password)
 
     # 4. 设置极性
-    run_sudo_command(f"echo {polarity} > /sys/class/pwm/{pwmchip_path}/{pwm_path}/polarity", sudo_password)
+    run_root_command(f"echo {polarity} > /sys/class/pwm/{pwmchip_path}/{pwm_path}/polarity", sudo_password)
 
     # 5. 使能PWM
-    run_sudo_command(f"echo 1 > /sys/class/pwm/{pwmchip_path}/{pwm_path}/enable", sudo_password)
+    run_root_command(f"echo 1 > /sys/class/pwm/{pwmchip_path}/{pwm_path}/enable", sudo_password)
 
     input("\n按回车键取消导出PWM...")
 
     # 6. 取消导出
-    run_sudo_command(f"echo {pwm_channel} > /sys/class/pwm/{pwmchip_path}/unexport", sudo_password)
+    run_root_command(f"echo {pwm_channel} > /sys/class/pwm/{pwmchip_path}/unexport", sudo_password)
     print("\n=== PWM配置完成 ===")
 
 if __name__ == "__main__":
     pwm_control()
-
