@@ -95,7 +95,7 @@ class ServoController:
         # 计算占空比
         duty_cycle = angle_to_duty_cycle(angle)
         
-        print(f"\n=== 配置舵机 {servonum} 角度 {angle} ===")
+        #print(f"\n=== 配置舵机 {servonum} 角度 {angle} ===")
         
         try:
             # 如果尚未打开，创建新的 PWM 实例
@@ -116,7 +116,7 @@ class ServoController:
                 # 更新已存在的 PWM 实例
                 self.pwm_instances[servonum].duty_cycle = duty_cycle
             
-            print(f"舵机 {servonum} 已设置到角度 {angle} (占空比: {duty_cycle:.2%})")
+            #print(f"舵机 {servonum} 已设置到角度 {angle} (占空比: {duty_cycle:.2%})")
         
         except Exception as e:
             print(f"设置舵机 {servonum} 失败: {str(e)}")
