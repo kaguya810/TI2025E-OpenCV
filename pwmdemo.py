@@ -6,7 +6,7 @@ controller = ServoController()
 # 设置舵机0到中位
 controller.servoset(servonum=3, angle=480)
 # 设置舵机1到最大角度
-controller.servoset(servonum=4, angle=700)
+controller.servoset(servonum=4, angle=0)
 # 保持2秒
 time.sleep(8)
 # 释放舵机
