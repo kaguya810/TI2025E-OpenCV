@@ -1,6 +1,25 @@
 import time
 from math import pi, isnan
 
+# PID控制器参数
+class PIDParams:
+    def __init__(self):
+        # 水平方向PID参数
+        self.pan_kp = 0.5
+        self.pan_ki = 0.0
+        self.pan_kd = 0.0
+        self.pan_imax = 100
+        
+        # 垂直方向PID参数
+        self.tilt_kp = 0.515
+        self.tilt_ki = 0.0
+        self.tilt_kd = 0.0
+        self.tilt_imax = 100
+        
+        # 输出缩放因子
+        self.output_scaler = 1.0
+
+# PID控制器类
 class PID:
     def __init__(self, p=0.0, i=0.0, d=0.0, imax=0.0):
         """
