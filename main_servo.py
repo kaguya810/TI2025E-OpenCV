@@ -10,7 +10,7 @@ from PWM import ServoController  # 导入舵机控制模块
 from camera_reader import CameraReader # 导入摄像头读取模块
 from pid import PID, PIDParams  # 导入PID控制器模块
 
-tilt_value = 512  # 垂直舵机初始值
+tilt_value = 700  # 垂直舵机初始值
 
 # 可调检测参数（全局变量）
 class DetectionParams:
@@ -181,14 +181,14 @@ def control_servos(pan_output, tilt_output, detected):
         # 水平舵机(连续舵机)控制
         # 将PID输出映射到PWM范围(0-1023)
         # 水平舵机: 0-1023对应不同旋转方向和速度
-        pan_value = int(480 - pan_output * 0.5 )  # 调整系数使输出在合理范围
+        pan_value = int(480 - pan_output * 0.7 )  # 调整系数使输出在合理范围
         pan_value = max(0, min(1023, pan_value))  # 限制在有效范围
         
         # 垂直舵机(180度舵机)控制
         # 将PID输出映射到角度范围(0-180度对应PWM值)
         # 假设512对应90度，每个角度单位约2.25个PWM单位
-        tilt_value = int(tilt_value + tilt_output * 0.2)  # 调整系数使输出在合理范围
-        tilt_value = max(256, min(768, tilt_value))  # 限制在有效范围
+        tilt_value = int(tilt_value - tilt_output * 0.2)  # 调整系数使输出在合理范围
+        tilt_value = max(256, min(1023, tilt_value))  # 限制在有效范围
         
         # 设置舵机
         controller.servoset(servonum=3, angle=pan_value)   # 水平舵机
