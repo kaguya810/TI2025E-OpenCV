@@ -267,6 +267,13 @@ try:
         # 处理激光计时（非阻塞方式）
         if laser_active:
             current_time = time.time()
+            if current_time - laser_timer >= 0.8 and not laser_sent:  # 0.8秒后发送激光开启指令
+                if ser:
+                    ser.write(LASER_ON_SIGNAL)
+                    print("发送激光开启指令")
+                laser_sent = True
+                laser_timer = current_time
+            
             if current_time - laser_timer >= 1.0:  # 1秒后关闭激光
                 if ser:
                     ser.write(LASER_OFF_SIGNAL)
