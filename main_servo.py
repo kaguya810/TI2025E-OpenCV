@@ -7,6 +7,7 @@ import select
 from collections import deque
 from math import pi, isnan
 from PWM import ServoController  # 导入舵机控制模块
+from camera_reader import CameraReader # 导入摄像头读取模块
 
 tilt_value = 512  # 垂直舵机初始值
 
@@ -118,13 +119,13 @@ detection_params = DetectionParams()
 class PIDParams:
     def __init__(self):
         # 水平方向PID参数
-        self.pan_kp = 1
+        self.pan_kp = 0.5
         self.pan_ki = 0.0
         self.pan_kd = 0.0
         self.pan_imax = 100
         
         # 垂直方向PID参数
-        self.tilt_kp = 1.250
+        self.tilt_kp = 0.515
         self.tilt_ki = 0.0
         self.tilt_kd = 0.0
         self.tilt_imax = 100
@@ -242,7 +243,7 @@ trail_image = None
 # 初始化舵机控制器
 controller = ServoController()
 # 设置舵机初始位置
-controller.servoset(servonum=3, angle=512)  # 水平舵机(连续舵机)初始中位
+controller.servoset(servonum=3, angle=480)  # 水平舵机(连续舵机)初始中位
 controller.servoset(servonum=4, angle=512)  # 垂直舵机(180度舵机)初始中位
 
 # 初始化PID控制器
@@ -280,7 +281,7 @@ def control_servos(pan_output, tilt_output, detected):
         # 水平舵机(连续舵机)控制
         # 将PID输出映射到PWM范围(0-1023)
         # 水平舵机: 0-1023对应不同旋转方向和速度
-        pan_value = int(512 + pan_output * 0.5)  # 调整系数使输出在合理范围
+        pan_value = int(480 - pan_output * 0.5 )  # 调整系数使输出在合理范围
         pan_value = max(0, min(1023, pan_value))  # 限制在有效范围
         
         # 垂直舵机(180度舵机)控制
@@ -335,29 +336,26 @@ def init_camera():
     print("无法访问摄像头！")
     return None
 
-# 初始化摄像头
-capture = init_camera()
-if capture is None:
+# 使用CameraReader初始化摄像头
+try:
+    # 定义摄像头设置参数
+    camera_settings = {
+        cv2.CAP_PROP_AUTO_WB: 0,
+        cv2.CAP_PROP_AUTO_EXPOSURE: 0.25,  # 手动曝光
+        cv2.CAP_PROP_EXPOSURE: -4,         # 曝光值
+        cv2.CAP_PROP_BUFFERSIZE: 1
+    }
+    
+    camera_reader = CameraReader(
+        cam_id=0, 
+        width=640, 
+        height=480, 
+        max_fps=60
+    )
+    print("摄像头初始化成功")
+except Exception as e:
+    print(f"摄像头初始化失败: {e}")
     exit()
-
-# 设置摄像头参数（只设置必要的参数）
-def set_camera_prop(cap, prop, value):
-    """安全设置摄像头属性"""
-    if cap.isOpened():
-        cap.set(prop, value)
-        actual_value = cap.get(prop)
-        if abs(actual_value - value) > 1e-3:
-            print(f"警告: 无法设置属性{prop}为{value}，实际值为{actual_value}")
-
-# 设置摄像头参数
-capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-capture.set(cv2.CAP_PROP_FPS, 60)
-capture.set(cv2.CAP_PROP_AUTO_WB, 0)
-capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-capture.set(cv2.CAP_PROP_EXPOSURE, -4)
-capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
 
 # 性能监控
 frame_count = 0
@@ -388,27 +386,18 @@ PARAM_STEP = {
 }
 
 try:
-    while capture.isOpened() and not stop_sending:
-        retval, frame = capture.read()
+    while not stop_sending:
+        # 从CameraReader获取帧
+        retval, frame = camera_reader.read()
         if not retval:
-            print("无法从摄像头读取帧，尝试重新初始化...")
-            # 尝试重新初始化摄像头
-            capture.release()
-            time.sleep(1)
-            capture = init_camera()
-            if capture is None:
-                break
+            print("无法从摄像头读取帧，等待下一帧...")
+            time.sleep(0.01)
             continue
             
-        frame_queue.append(frame)
-        if len(frame_queue) < frame_queue.maxlen:
-            continue
-            
-        process_frame = frame_queue.popleft()
         process_start = time.time()
         
         # 预处理
-        gray = cv2.cvtColor(process_frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, 
                                (detection_params.gaussian_blur_size, detection_params.gaussian_blur_size), 
                                0)
@@ -438,7 +427,7 @@ try:
             start_time = time.time()
         
         # 创建显示图像
-        display_img = process_frame.copy()
+        display_img = frame.copy()
         height, width = display_img.shape[:2]
         img_center = (width // 2, height // 2)
         
@@ -658,10 +647,12 @@ try:
         elif key == ord(','):  # 减少输出缩放因子
             pid_params.output_scaler = max(0.1, pid_params.output_scaler - PARAM_STEP['output_scaler'])
             print(f"输出缩放因子: {pid_params.output_scaler:.1f}")
-
+            
 finally:
-    if capture is not None and capture.isOpened():
-        capture.release()
+    # 停止摄像头
+    if 'camera_reader' in locals():
+        camera_reader.stop()
+    
     cv2.destroyAllWindows()           
     # 释放舵机
     controller.servo_release(servonum=3)
