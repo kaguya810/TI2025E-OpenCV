@@ -14,9 +14,9 @@ from pid import PID, PIDParams
 # 串口配置参数
 SERIAL_PORT = '/dev/ttyUSB0'  # 根据实际设备修改
 BAUD_RATE = 9600
-START_SIGNAL = b'start'  # 开始控制信号
-LASER_ON_SIGNAL = b'laseron'  # 激光开启信号
-LASER_OFF_SIGNAL = b'laseroff'  # 激光关闭信号
+START_SIGNAL = b'start1'  # 开始控制信号
+LASER_ON_SIGNAL = b'laseron\n'  # 激光开启信号
+LASER_OFF_SIGNAL = b'laseroff\n'  # 激光关闭信号
 
 tilt_value = 700  # 垂直舵机初始值
 
@@ -130,7 +130,7 @@ kalman_filter = KalmanFilter(process_noise=1e-4, measurement_noise=1e-2)
 prev_center = None
 frame_queue = deque(maxlen=3)
 trail_image = None
-control_enabled = True  # 控制状态标志
+control_enabled = False  # 控制状态标志
 laser_sent = False       # 激光发射标志
 serial_buffer = bytearray()  # 串口接收缓冲区
 laser_timer = 0          # 激光计时器
@@ -140,7 +140,7 @@ laser_active = False     # 激光激活状态
 controller = ServoController()
 # 设置舵机初始位置
 controller.servoset(servonum=3, angle=480)  # 水平舵机
-controller.servoset(servonum=4, angle=512)  # 垂直舵机
+controller.servoset(servonum=4, angle=768)  # 垂直舵机
 
 # 初始化PID控制器
 pan_pid = PID(
@@ -208,8 +208,8 @@ except:
 try:
     camera_reader = CameraReader(
         cam_id=0, 
-        width=640, 
-        height=480, 
+        width=800, 
+        height=600, 
         max_fps=60
     )
     print("摄像头初始化成功")
@@ -354,7 +354,7 @@ try:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
             cv2.putText(display_img, f"Tilt Ki: {pid_params.tilt_ki:.3f}", (10, y_offset+200), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
-            cv极客.putText(display_img, f"Tilt Kd: {pid_params.tilt_kd:.3f}", (10, y_offset+225), 
+            cv2.putText(display_img, f"Tilt Kd: {pid_params.tilt_kd:.3f}", (10, y_offset+225), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
         
         # 绘制中心点
@@ -487,7 +487,7 @@ try:
             print(f"最小矩形度: {detection_params.min_rectangularity:.2f}")
         elif key == ord('4'):  # 减少最小矩形度
             detection_params.min_rectangularity = max(0.1, detection_params.min_rectangularity - PARAM_STEP['min_rectangularity'])
-            print(f"最小矩形极客度: {detection_params.min_rectangularity:.2f}")
+            print(f"最小矩形度: {detection_params.min_rectangularity:.2f}")
         elif key == ord('5'):  # 增加最大长宽比
             detection_params.max_aspect_ratio += PARAM_STEP['max_aspect_ratio']
             print(f"最大长宽比: {detection_params.max_aspect_ratio:.1f}")
@@ -539,7 +539,7 @@ try:
         elif key == ord('x'):  # 减少垂直比例系数
             pid_params.tilt_kp = max(0, pid_params.tilt_kp - PARAM_STEP['tilt_kp'])
             tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
-            print(f"垂直比例系数(Kp): {pid_params.tilt_k极客p:.3f}")
+            print(f"垂直比例系数(Kp): {pid_params.tilt_kp:.3f}")
         elif key == ord('c'):  # 增加垂直积分系数
             pid_params.tilt_ki += PARAM_STEP['tilt_ki']
             tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
