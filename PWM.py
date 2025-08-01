@@ -155,15 +155,14 @@ class ServoController:
             print(f"舵机 {servonum} 未初始化")
 
 if __name__ == "__main__":
-
     # 创建 ServoController 实例
     controller = ServoController()
     # 设置舵机0到中位
     controller.servoset(servonum=3, angle=512)
     # 设置舵机1到最大角度
     controller.servoset(servonum=4, angle=1023)
-    # 保持2秒
+    # 保持8秒
     time.sleep(8)
     # 释放舵机
-    controller.servo_release(servonum=0)
-    controller.servo_release(servonum=1)
+    controller.servo_release(servonum=3)
+    controller.servo_release(servonum=4)

@@ -5,15 +5,15 @@ from math import pi, isnan
 class PIDParams:
     def __init__(self):
         # 水平方向PID参数
-        self.pan_kp = 0.5
-        self.pan_ki = 0.0
-        self.pan_kd = 0.0
+        self.pan_kp = 0.088
+        self.pan_ki = 0.055
+        self.pan_kd = 0.02
         self.pan_imax = 100
         
         # 垂直方向PID参数
-        self.tilt_kp = 0.515
+        self.tilt_kp = 0.360
         self.tilt_ki = 0.0
-        self.tilt_kd = 0.0
+        self.tilt_kd = 0.01
         self.tilt_imax = 100
         
         # 输出缩放因子
