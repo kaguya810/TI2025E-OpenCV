@@ -4,7 +4,7 @@ import time
 import threading
 import sys
 import select
-import serial  # 新增串口通信模块
+import serial
 from collections import deque
 from math import pi, isnan
 from PWM import ServoController
@@ -14,8 +14,9 @@ from pid import PID, PIDParams
 # 串口配置参数
 SERIAL_PORT = '/dev/ttyUSB0'  # 根据实际设备修改
 BAUD_RATE = 9600
-START_SIGNAL = b's'  # 开始控制信号
-LASER_SIGNAL = b'f'  # 激光发射信号
+START_SIGNAL = b'start'  # 开始控制信号
+LASER_ON_SIGNAL = b'laseron'  # 激光开启信号
+LASER_OFF_SIGNAL = b'laseroff'  # 激光关闭信号
 
 tilt_value = 700  # 垂直舵机初始值
 
@@ -131,12 +132,15 @@ frame_queue = deque(maxlen=3)
 trail_image = None
 control_enabled = True  # 控制状态标志
 laser_sent = False       # 激光发射标志
+serial_buffer = bytearray()  # 串口接收缓冲区
+laser_timer = 0          # 激光计时器
+laser_active = False     # 激光激活状态
 
 # 初始化舵机控制器
 controller = ServoController()
 # 设置舵机初始位置
 controller.servoset(servonum=3, angle=480)  # 水平舵机
-controller.servoset(servonum=4, angle=768)  # 垂直舵机
+controller.servoset(servonum=4, angle=512)  # 垂直舵机
 
 # 初始化PID控制器
 pan_pid = PID(
@@ -242,13 +246,32 @@ PARAM_STEP = {
 
 try:
     while not stop_sending:
-        # 检查串口信号
+        # 检查串口信号（非阻塞方式）
         if ser and ser.in_waiting > 0:
-            data = ser.read(1)
-            if data == START_SIGNAL:
+            # 读取所有可用数据
+            data = ser.read(ser.in_waiting)
+            serial_buffer.extend(data)
+            
+            # 检查缓冲区中是否有"start"命令
+            if START_SIGNAL in serial_buffer:
+                # 找到命令位置
+                index = serial_buffer.find(START_SIGNAL)
+                # 移除已处理的数据（包括命令本身）
+                serial_buffer = serial_buffer[index + len(START_SIGNAL):]
+                
                 control_enabled = True
                 laser_sent = False  # 重置激光发射标志
+                laser_active = False  # 重置激光激活状态
                 print("接收到开始控制信号")
+        
+        # 处理激光计时（非阻塞方式）
+        if laser_active:
+            current_time = time.time()
+            if current_time - laser_timer >= 1.0:  # 1秒后关闭激光
+                if ser:
+                    ser.write(LASER_OFF_SIGNAL)
+                    print("发送激光关闭指令")
+                laser_active = False
         
         # 从CameraReader获取帧
         retval, frame = camera_reader.read()
@@ -300,13 +323,17 @@ try:
         cv2.putText(display_img, f"Proc: {avg_process_time:.1f}ms", (10, 60), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         # 显示控制状态
-        control_status = "控制状态: " + ("已启用" if control_enabled else "已禁用")
+        control_status = "CTRL: " + ("ON" if control_enabled else "OFF")
         cv2.putText(display_img, control_status, (10, 90), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if control_enabled else (0, 0, 255), 2)
+        # 显示激光状态
+        laser_status = "LASER: " + ("ON" if laser_active else "OFF")
+        cv2.putText(display_img, laser_status, (10, 120), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if laser_active else (0, 0, 255), 2)
     
         # 显示当前参数值
         if detection_params.show_params:
-            y_offset = 120
+            y_offset = 150
             cv2.putText(display_img, f"Min Area: {detection_params.min_area}", (10, y_offset), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
             cv2.putText(display_img, f"Min Rect: {detection_params.min_rectangularity:.2f}", (10, y_offset+25), 
@@ -327,7 +354,7 @@ try:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
             cv2.putText(display_img, f"Tilt Ki: {pid_params.tilt_ki:.3f}", (10, y_offset+200), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
-            cv2.putText(display_img, f"Tilt Kd: {pid_params.tilt_kd:.3f}", (10, y_offset+225), 
+            cv极客.putText(display_img, f"Tilt Kd: {pid_params.tilt_kd:.3f}", (10, y_offset+225), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
         
         # 绘制中心点
@@ -368,6 +395,7 @@ try:
             print(f"矩形中心坐标: ({filtered_point[0]}, {filtered_point[1]})")
             print(f"中心偏移量: X: {offset_x}, Y: {offset_y}")
             print(f"控制状态: {'已启用' if control_enabled else '已禁用'}")
+            print(f"激光状态: {'开启' if laser_active else '关闭'}")
             if control_enabled:
                 print(f"PID输出: Pan: {pan_output:.1f}, Tilt: {tilt_output:.1f}")
             print(f"处理延迟: {avg_process_time:.1f}ms")
@@ -380,11 +408,13 @@ try:
                     control_servos(pan_output, tilt_output, True)
                     
                     # 检查是否满足激光发射条件
-                    if abs(offset_x) < 16 and abs(offset_y) < 16 and not laser_sent:
+                    if abs(offset_x) < 16 and abs(offset_y) < 16 and not laser_sent and not laser_active:
                         if ser:
-                            ser.write(LASER_SIGNAL)
-                            print("发送激光发射指令")
+                            ser.write(LASER_ON_SIGNAL)
+                            print("发送激光开启指令")
                         laser_sent = True
+                        laser_active = True
+                        laser_timer = time.time()  # 记录激光开启时间
                 send_counter = 0
         else:
             # 未检测到矩形时重置PID控制器
@@ -396,6 +426,7 @@ try:
             print(f"=== 实时检测结果 (FPS: {fps:.1f}) ===")
             print("未检测到黑色矩形")
             print(f"控制状态: {'已启用' if control_enabled else '已禁用'}")
+            print(f"激光状态: {'开启' if laser_active else '关闭'}")
             print(f"处理延迟: {avg_process_time:.1f}ms")
             print("=" * 40)
             
@@ -449,14 +480,14 @@ try:
             detection_params.min_area += PARAM_STEP['min_area']
             print(f"最小面积: {detection_params.min_area}")
         elif key == ord('2'):  # 减少最小面积
-            detection_params.min_area = max(10, detection_params.min_area - PARAM_STEP['min_area'])
+            detection_params.min_area = max(10, detection_params.min_area - PARAM_STEP['极客min_area'])
             print(f"最小面积: {detection_params.min_area}")
         elif key == ord('3'):  # 增加最小矩形度
             detection_params.min_rectangularity = min(0.95, detection_params.min_rectangularity + PARAM_STEP['min_rectangularity'])
             print(f"最小矩形度: {detection_params.min_rectangularity:.2f}")
         elif key == ord('4'):  # 减少最小矩形度
             detection_params.min_rectangularity = max(0.1, detection_params.min_rectangularity - PARAM_STEP['min_rectangularity'])
-            print(f"最小矩形度: {detection_params.min_rectangularity:.2f}")
+            print(f"最小矩形极客度: {detection_params.min_rectangularity:.2f}")
         elif key == ord('5'):  # 增加最大长宽比
             detection_params.max_aspect_ratio += PARAM_STEP['max_aspect_ratio']
             print(f"最大长宽比: {detection_params.max_aspect_ratio:.1f}")
@@ -508,7 +539,7 @@ try:
         elif key == ord('x'):  # 减少垂直比例系数
             pid_params.tilt_kp = max(0, pid_params.tilt_kp - PARAM_STEP['tilt_kp'])
             tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
-            print(f"垂直比例系数(Kp): {pid_params.tilt_kp:.3f}")
+            print(f"垂直比例系数(Kp): {pid_params.tilt_k极客p:.3f}")
         elif key == ord('c'):  # 增加垂直积分系数
             pid_params.tilt_ki += PARAM_STEP['tilt_ki']
             tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
@@ -541,6 +572,12 @@ finally:
     # 释放舵机
     controller.servo_release(servonum=3)
     controller.servo_release(servonum=4)
+    
+    # 确保激光关闭
+    if laser_active and ser and ser.is_open:
+        ser.write(LASER_OFF_SIGNAL)
+        print("发送激光关闭指令")
+    
     # 关闭串口
     if ser and ser.is_open:
         ser.close()
