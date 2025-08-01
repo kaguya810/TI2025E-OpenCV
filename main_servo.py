@@ -118,13 +118,13 @@ detection_params = DetectionParams()
 class PIDParams:
     def __init__(self):
         # 水平方向PID参数
-        self.pan_kp = 4
+        self.pan_kp = 1
         self.pan_ki = 0.0
         self.pan_kd = 0.0
         self.pan_imax = 100
         
         # 垂直方向PID参数
-        self.tilt_kp = 10
+        self.tilt_kp = 1.250
         self.tilt_ki = 0.0
         self.tilt_kd = 0.0
         self.tilt_imax = 100
