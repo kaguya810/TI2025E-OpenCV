@@ -299,7 +299,7 @@ try:
             elif current_mode == "start1" and laser_active:
                 # 点射模式：使用计时器控制
                 current_time = time.time()
-                if current_time - laser_timer >= 0.8 and not laser_sent:
+                if current_time - laser_timer >= 1.8 and not laser_sent:
                     if ser:
                         ser.write(LASER_ON_SIGNAL)
                         print("发送激光开启指令")
@@ -311,6 +311,12 @@ try:
                         ser.write(LASER_OFF_SIGNAL)
                         print("发送激光关闭指令")
                     laser_active = False
+                    current_mode = None
+                    laser_sent = False
+                    control_enabled = False
+                    serial_buffer.clear()  # 清空串口缓冲区
+
+
         
         # 从CameraReader获取帧
         retval, frame = camera_reader.read()

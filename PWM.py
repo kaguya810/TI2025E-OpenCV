@@ -143,26 +143,32 @@ class ServoController:
             sys.exit(1)
     
     def servo_release(self, servonum: int):
-        """释放舵机 PWM 资源"""
+        """释放舵机 PWM 资源并使其失去动力自由旋转"""
         if servonum in self.pwm_instances:
             try:
+                # 关键修改：先禁用PWM输出使舵机失去动力
+                self.pwm_instances[servonum].disable()
+                # 然后关闭PWM设备
                 self.pwm_instances[servonum].close()
                 del self.pwm_instances[servonum]
-                print(f"舵机 {servonum} PWM 已释放")
+                print(f"舵机 {servonum} 已释放并失去动力")
             except Exception as e:
                 print(f"释放舵机 {servonum} 失败: {str(e)}")
         else:
             print(f"舵机 {servonum} 未初始化")
 
+
 if __name__ == "__main__":
     # 创建 ServoController 实例
     controller = ServoController()
     # 设置舵机0到中位
-    controller.servoset(servonum=3, angle=512)
+    controller.servoset(servonum=3, angle=480)
     # 设置舵机1到最大角度
-    controller.servoset(servonum=4, angle=1023)
+    controller.servoset(servonum=4, angle=512)
     # 保持8秒
-    time.sleep(8)
+    time.sleep(2)
     # 释放舵机
     controller.servo_release(servonum=3)
     controller.servo_release(servonum=4)
+    
+    print("所有舵机已释放")
