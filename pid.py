@@ -5,8 +5,8 @@ from math import pi, isnan
 class PIDParams:
     def __init__(self):
         # 水平方向PID参数
-        self.pan_kp = 0.118
-        self.pan_ki = 0.035
+        self.pan_kp = 0.168
+        self.pan_ki = 0.045
         self.pan_kd = 0.005
         self.pan_imax = 100
         
