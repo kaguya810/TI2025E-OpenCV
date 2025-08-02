@@ -137,6 +137,8 @@ serial_buffer = bytearray()  # 串口接收缓冲区
 laser_timer = 0          # 激光计时器
 laser_active = False     # 激光激活状态
 current_mode = "idle"    # 当前模式: idle/start1/start2
+center_stay_timer = 0    # 中心区域停留计时器
+in_center_zone = False   # 是否在中心区域
 
 # 初始化舵机控制器
 controller = ServoController()
@@ -270,6 +272,8 @@ try:
                 laser_sent = False
                 laser_active = False
                 current_mode = "start1"
+                in_center_zone = False
+                center_stay_timer = 0
                 print("接收到开始控制信号 (模式1)")
             
             # 检查start2信号
@@ -299,7 +303,7 @@ try:
             elif current_mode == "start1" and laser_active:
                 # 点射模式：使用计时器控制
                 current_time = time.time()
-                if current_time - laser_timer >= 1.8 and not laser_sent:
+                if current_time - laser_timer >= 0.8 and not laser_sent:
                     if ser:
                         ser.write(LASER_ON_SIGNAL)
                         print("发送激光开启指令")
@@ -357,7 +361,7 @@ try:
         # 创建显示图像
         display_img = frame.copy()
         height, width = display_img.shape[:2]
-        img_center = (width // 2, height // 2)
+        img_center = (width // 2, (height // 2) - 13 )
         
         # 显示性能信息
         cv2.putText(display_img, f"FPS: {fps:.1f}", (10, 30), 
@@ -376,10 +380,15 @@ try:
         mode_status = f"MODE: {current_mode}"
         cv2.putText(display_img, mode_status, (10, 150), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+        # 显示中心区域停留时间
+        if in_center_zone:
+            stay_time = time.time() - center_stay_timer
+            cv2.putText(display_img, f"Stay: {stay_time:.1f}s", (10, 180), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
     
         # 显示当前参数值
         if detection_params.show_params:
-            y_offset = 180
+            y_offset = 210
             cv2.putText(display_img, f"Min Area: {detection_params.min_area}", (10, y_offset), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
             cv2.putText(display_img, f"Min Rect: {detection_params.min_rectangularity:.2f}", (10, y_offset+25), 
@@ -406,6 +415,13 @@ try:
         # 绘制中心点
         cv2.circle(display_img, img_center, 5, (0, 0, 255), -1)
         
+        # 绘制中心区域 (24x24像素)
+        center_zone_size = 24
+        cv2.rectangle(display_img, 
+                     (img_center[0] - center_zone_size, img_center[1] - center_zone_size),
+                     (img_center[0] + center_zone_size, img_center[1] + center_zone_size),
+                     (0, 255, 255), 1)
+        
         # 如果找到矩形
         if filtered_point is not None:
             if trail_image is None:
@@ -428,6 +444,26 @@ try:
             offset_x = filtered_point[0] - img_center[0]
             offset_y = filtered_point[1] - img_center[1]
             
+            # 检查是否在中心区域 (24x24像素)
+            in_center = abs(offset_x) < center_zone_size and abs(offset_y) < center_zone_size
+            
+            # 更新中心区域停留状态
+            if in_center:
+                if not in_center_zone:
+                    # 首次进入中心区域
+                    in_center_zone = True
+                    center_stay_timer = time.time()
+            else:
+                # 离开中心区域
+                in_center_zone = False
+                # 如果激光激活则立即关闭
+                if laser_active and current_mode == "start1":
+                    if ser:
+                        ser.write(LASER_OFF_SIGNAL)
+                        print("发送激光关闭指令 (离开中心区域)")
+                    laser_active = False
+                    laser_sent = False
+            
             # 仅在控制启用时进行PID计算
             if control_enabled:
                 pan_output = pan_pid.get_pid(offset_x, pid_params.output_scaler)
@@ -443,6 +479,9 @@ try:
             print(f"控制状态: {'已启用' if control_enabled else '已禁用'}")
             print(f"激光状态: {'开启' if laser_active else '关闭'}")
             print(f"当前模式: {current_mode}")
+            if in_center_zone:
+                stay_time = time.time() - center_stay_timer
+                print(f"中心区域停留: {stay_time:.2f}s")
             if control_enabled:
                 print(f"PID输出: Pan: {pan_output:.1f}, Tilt: {tilt_output:.1f}")
             print(f"处理延迟: {avg_process_time:.1f}ms")
@@ -455,19 +494,22 @@ try:
                     control_servos(pan_output, tilt_output, True)
                     
                     # 检查是否满足激光发射条件（仅start1模式）
-                    if current_mode == "start1" and abs(offset_x) < 24 and abs(offset_y) < 24 and not laser_sent and not laser_active:
-                        if ser:
-                            ser.write(LASER_ON_SIGNAL)
-                            print("发送激光开启指令")
-                        laser_sent = True
-                        laser_active = True
-                        laser_timer = time.time()  # 记录激光开启时间
+                    if current_mode == "start1" and in_center_zone and not laser_active:
+                        # 检查停留时间是否达到0.6秒
+                        if time.time() - center_stay_timer >= 0.6:
+                            if ser:
+                                ser.write(LASER_ON_SIGNAL)
+                                print("发送激光开启指令 (满足停留时间)")
+                            laser_active = True
+                            laser_sent = True
+                            laser_timer = time.time()  # 记录激光开启时间
                 send_counter = 0
         else:
             # 未检测到矩形时重置PID控制器
             pan_pid.reset()
             tilt_pid.reset()
             laser_sent = False  # 重置激光发射标志
+            in_center_zone = False  # 重置中心区域状态
             
             print("\033c", end="")
             print(f"=== 实时检测结果 (FPS: {fps:.1f}) ===")
