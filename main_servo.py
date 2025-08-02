@@ -24,9 +24,9 @@ tilt_value = 700  # 垂直舵机初始值
 # 可调检测参数
 class DetectionParams:
     def __init__(self):
-        self.min_area = 3320
-        self.min_rectangularity = 0.7
-        self.max_aspect_ratio = 5.0
+        self.min_area = 10000
+        self.min_rectangularity = 0.8
+        self.max_aspect_ratio = 2.0
         self.distance_weight = 0.3
         self.adaptive_block_size = 11
         self.adaptive_c = 2
@@ -142,7 +142,7 @@ current_mode = "idle"    # 当前模式: idle/start1/start2
 controller = ServoController()
 # 设置舵机初始位置
 controller.servoset(servonum=3, angle=480)  # 水平舵机
-controller.servoset(servonum=4, angle=768)  # 垂直舵机
+controller.servoset(servonum=4, angle=600)  # 垂直舵机
 
 # 初始化PID控制器
 pan_pid = PID(
@@ -187,7 +187,7 @@ def control_servos(pan_output, tilt_output, detected):
         
         # 未检测到矩形且控制启用时，水平舵机正转
         if not detected and control_enabled:
-            pan_value = 768  # 水平舵机正转速度
+            pan_value = 510  # 水平舵机正转速度
             # 垂直舵机保持当前值
         else:
             pan_value = int(480 - pan_output * 0.8)
@@ -306,7 +306,7 @@ try:
                     laser_sent = True
                     laser_timer = current_time
                 
-                if current_time - laser_timer >= 1.0:
+                if current_time - laser_timer >= 2.0:
                     if ser:
                         ser.write(LASER_OFF_SIGNAL)
                         print("发送激光关闭指令")
@@ -452,7 +452,7 @@ try:
                     control_servos(pan_output, tilt_output, True)
                     
                     # 检查是否满足激光发射条件（仅start1模式）
-                    if current_mode == "start1" and abs(offset_x) < 16 and abs(offset_y) < 16 and not laser_sent and not laser_active:
+                    if current_mode == "start1" and abs(offset_x) < 24 and abs(offset_y) < 24 and not laser_sent and not laser_active:
                         if ser:
                             ser.write(LASER_ON_SIGNAL)
                             print("发送激光开启指令")
