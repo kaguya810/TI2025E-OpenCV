@@ -15,7 +15,8 @@ from pid import PID, PIDParams
 SERIAL_PORT = '/dev/ttyUSB0'  # 根据实际设备修改
 BAUD_RATE = 9600
 START1_SIGNAL = b'start1'  # 开始控制信号1
-START2_SIGNAL = b'start2'  # 开始控制信号2（激光连续模式）
+START2_SIGNAL = b'start2'  # 开始控制信号2 (舵机方向转换)
+START3_SIGNAL = b'start3'  # 开始控制信号3（激光连续模式）
 LASER_ON_SIGNAL = b'1;'    # 激光开启信号
 LASER_OFF_SIGNAL = b'0;'   # 激光关闭信号
 
@@ -139,6 +140,7 @@ laser_active = False     # 激光激活状态
 current_mode = "idle"    # 当前模式: idle/start1/start2
 center_stay_timer = 0    # 中心区域停留计时器
 in_center_zone = False   # 是否在中心区域
+fanzhuan = False  # 是否反转舵机方向
 
 # 初始化舵机控制器
 controller = ServoController()
@@ -186,10 +188,13 @@ def control_servos(pan_output, tilt_output, detected):
     """控制舵机运动"""
     try:
         global tilt_value
-        
+        global fanzhuan
+
         # 未检测到矩形且控制启用时，水平舵机正转
         if not detected and control_enabled:
             pan_value = 480 + 30  # 水平舵机正转速度
+            if fanzhuan:
+                pan_value = 480 - 30
             # 垂直舵机保持当前值
         else:
             pan_value = int(480 - pan_output * 0.5)
@@ -277,22 +282,33 @@ try:
                 print("接收到开始控制信号 (模式1)")
             
             # 检查start2信号
-            if START2_SIGNAL in serial_buffer:
+            elif START2_SIGNAL in serial_buffer:
                 index = serial_buffer.find(START2_SIGNAL)
                 serial_buffer = serial_buffer[index + len(START2_SIGNAL):]
                 control_enabled = True
                 current_mode = "start2"
+                in_center_zone = False
+                center_stay_timer = 0
+                # 切换舵机方向
+                fanzhuan = not fanzhuan
+                
+            # 检查start3信号
+            if START3_SIGNAL in serial_buffer:
+                index = serial_buffer.find(START3_SIGNAL)
+                serial_buffer = serial_buffer[index + len(START3_SIGNAL):]
+                control_enabled = True
+                current_mode = "start3"
                 # 立即开启激光
                 if ser:
                     ser.write(LASER_ON_SIGNAL)
                     print("发送激光开启指令 (连续模式)")
                 laser_active = True
                 laser_sent = True
-                print("接收到开始控制信号 (模式2)")
+                print("接收到开始控制信号 (模式3)")
         
         # 处理激光控制
         if control_enabled:
-            if current_mode == "start2":
+            if current_mode == "start3":
                 # 连续模式：确保激光保持开启
                 if not laser_sent: 
                     if ser:
@@ -300,7 +316,7 @@ try:
                         print("发送激光开启指令 (连续模式)")
                     laser_sent = True
                     laser_active = True
-            elif current_mode == "start1" and laser_active:
+            elif current_mode == "start1" or current_mode == "start2" and laser_active:
                 # 点射模式：使用计时器控制
                 current_time = time.time()
                 if current_time - laser_timer >= 0.8 and not laser_sent:
@@ -319,10 +335,6 @@ try:
                     laser_sent = False
                     serial_buffer.clear()  # 清空串口缓冲区
 
-                    
-
-
-        
         # 从CameraReader获取帧
         retval, frame = camera_reader.read()
         if not retval:
@@ -416,7 +428,7 @@ try:
         cv2.circle(display_img, img_center, 5, (0, 0, 255), -1)
         
         # 绘制中心区域 (24x24像素)
-        center_zone_size = 32
+        center_zone_size = 48
         cv2.rectangle(display_img, 
                      (img_center[0] - center_zone_size, img_center[1] - center_zone_size),
                      (img_center[0] + center_zone_size, img_center[1] + center_zone_size),
@@ -493,8 +505,8 @@ try:
                 if control_enabled:
                     control_servos(pan_output, tilt_output, True)
                     
-                    # 检查是否满足激光发射条件（仅start1模式）
-                    if current_mode == "start1" and in_center_zone and not laser_active:
+                    # 检查是否满足激光发射条件（仅start1、2模式）
+                    if current_mode == "start1" or current_mode == "start2" and in_center_zone and not laser_active:
                         # 检查停留时间是否达到0.6秒
                         if time.time() - center_stay_timer >= 0.6:
                             if ser:
