@@ -24,7 +24,7 @@ tilt_value = 700  # 垂直舵机初始值
 # 可调检测参数
 class DetectionParams:
     def __init__(self):
-        self.min_area = 10000
+        self.min_area = 5000
         self.min_rectangularity = 0.8
         self.max_aspect_ratio = 2.0
         self.distance_weight = 0.3
@@ -71,7 +71,7 @@ def find_black_rectangle_center(thresh, prev_center=None):
         detection_params.adaptive_block_size, 
         detection_params.adaptive_c
     )
-    
+
     kernel = np.ones((detection_params.morph_kernel_size, detection_params.morph_kernel_size), np.uint8)
     morphed = cv2.morphologyEx(adaptive_thresh, cv2.MORPH_CLOSE, kernel)
     morphed = cv2.dilate(morphed, kernel, iterations=1)
@@ -190,8 +190,8 @@ def control_servos(pan_output, tilt_output, detected):
             pan_value = 510  # 水平舵机正转速度
             # 垂直舵机保持当前值
         else:
-            pan_value = int(480 - pan_output * 0.8)
-            pan_value = max(256, min(768, pan_value))
+            pan_value = int(480 - pan_output * 0.5)
+            pan_value = max(128, min(892, pan_value))
             
             tilt_value = int(tilt_value - tilt_output * 0.2)
             tilt_value = max(256, min(1023, tilt_value))
@@ -243,7 +243,7 @@ PARAM_STEP = {
     'adaptive_c': 1,
     'morph_kernel_size': 1,
     'gaussian_blur_size': 2,
-    'pan_kp': 0.01,
+    'pan_kp': 0.002,
     'pan_ki': 0.001,
     'pan_kd': 0.005,
     'tilt_kp': 0.01,
@@ -290,7 +290,7 @@ try:
         if control_enabled:
             if current_mode == "start2":
                 # 连续模式：确保激光保持开启
-                if not laser_sent:
+                if not laser_sent: 
                     if ser:
                         ser.write(LASER_ON_SIGNAL)
                         print("发送激光开启指令 (连续模式)")
@@ -311,10 +311,11 @@ try:
                         ser.write(LASER_OFF_SIGNAL)
                         print("发送激光关闭指令")
                     laser_active = False
-                    current_mode = None
+                    current_mode = "start1"
                     laser_sent = False
-                    control_enabled = False
                     serial_buffer.clear()  # 清空串口缓冲区
+
+                    
 
 
         
@@ -339,11 +340,7 @@ try:
         # 应用卡尔曼滤波
         filtered_point = None
         if center_point:
-            filtered_point = kalman_filter.predict(center_point)
-            prev_center = filtered_point
-        else:
-            if kalman_filter.predicted:
-                filtered_point = kalman_filter.predicted
+            filtered_point = center_point
         
         # 计算性能指标
         process_time = (time.time() - process_start) * 1000
@@ -534,10 +531,10 @@ try:
             detection_params.min_area = max(10, detection_params.min_area - PARAM_STEP['min_area'])
             print(f"最小面积: {detection_params.min_area}")
         elif key == ord('3'):  # 增加最小矩形度
-            detection_params.min_rectangularity = min(0.95, detection_params.min_rectangularity + PARAM_STEP['min_极客rectangularity'])
+            detection_params.min_rectangularity = min(0.95, detection_params.min_rectangularity + PARAM_STEP['min_rectangularity'])
             print(f"最小矩形度: {detection_params.min_rectangularity:.2f}")
         elif key == ord('4'):  # 减少最小矩形度
-            detection_params.min_rectangularity = max(0.1, detection_params.min_rectangularity - PARAM_ST极客_STEP['min_rectangularity'])
+            detection_params.min_rectangularity = max(0.1, detection_params.min_rectangularity - PARAM_STEP['min_rectangularity'])
             print(f"最小矩形度: {detection_params.min_rectangularity:.2f}")
         elif key == ord('5'):  # 增加最大长宽比
             detection_params.max_aspect_ratio += PARAM_STEP['max_aspect_ratio']
@@ -571,7 +568,7 @@ try:
             pid_params.pan_ki += PARAM_STEP['pan_ki']
             pan_pid = PID(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
             print(f"水平积分系数(Ki): {pid_params.pan_ki:.3f}")
-        elif key == ord('f'):  # 减少水平积分极客系数
+        elif key == ord('f'):  # 减少水平积分系数
             pid_params.pan_ki = max(0, pid_params.pan_ki - PARAM_STEP['pan_ki'])
             pan_pid = PID(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
             print(f"水平积分系数(Ki): {pid_params.pan_ki:.3f}")
