@@ -469,12 +469,11 @@ try:
                 # 离开中心区域
                 in_center_zone = False
                 # 如果激光激活则立即关闭
-                if laser_active and current_mode == "start1":
-                    if ser:
-                        ser.write(LASER_OFF_SIGNAL)
-                        print("发送激光关闭指令 (离开中心区域)")
-                    laser_active = False
-                    laser_sent = False
+                if ser:
+                    ser.write(LASER_OFF_SIGNAL)
+                    print("发送激光关闭指令 (离开中心区域)")                                                            
+                laser_active = False
+                laser_sent = False
             
             # 仅在控制启用时进行PID计算
             if control_enabled:
