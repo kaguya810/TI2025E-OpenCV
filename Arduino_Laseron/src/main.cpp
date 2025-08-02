@@ -21,7 +21,7 @@ void setup() {
   pinMode(LASER_PIN, OUTPUT);
   pinMode(BUTTON1_PIN, INPUT); // A0低电平有效
   pinMode(BUTTON2_PIN, INPUT); // A1高电平有效
-
+  digitalWrite(LASER_PIN, LOW);
   Serial.begin(9600);
 
   // 初始化OLED
