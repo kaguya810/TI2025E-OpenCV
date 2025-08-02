@@ -361,7 +361,7 @@ try:
         # 创建显示图像
         display_img = frame.copy()
         height, width = display_img.shape[:2]
-        img_center = (width // 2, (height // 2) - 13 )
+        img_center = (width // 2, (height // 2) - 4  )
         
         # 显示性能信息
         cv2.putText(display_img, f"FPS: {fps:.1f}", (10, 30), 
