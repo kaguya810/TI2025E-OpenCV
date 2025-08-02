@@ -144,7 +144,7 @@ in_center_zone = False   # 是否在中心区域
 controller = ServoController()
 # 设置舵机初始位置
 controller.servoset(servonum=3, angle=480)  # 水平舵机
-controller.servoset(servonum=4, angle=600)  # 垂直舵机
+controller.servoset(servonum=4, angle=700)  # 垂直舵机
 
 # 初始化PID控制器
 pan_pid = PID(
@@ -189,14 +189,14 @@ def control_servos(pan_output, tilt_output, detected):
         
         # 未检测到矩形且控制启用时，水平舵机正转
         if not detected and control_enabled:
-            pan_value = 510  # 水平舵机正转速度
+            pan_value = 480 + 30  # 水平舵机正转速度
             # 垂直舵机保持当前值
         else:
             pan_value = int(480 - pan_output * 0.5)
             pan_value = max(128, min(892, pan_value))
             
             tilt_value = int(tilt_value - tilt_output * 0.2)
-            tilt_value = max(256, min(1023, tilt_value))
+            tilt_value = max(256, min(700, tilt_value))
         
         controller.servoset(servonum=3, angle=pan_value)
         controller.servoset(servonum=4, angle=tilt_value)
@@ -416,7 +416,7 @@ try:
         cv2.circle(display_img, img_center, 5, (0, 0, 255), -1)
         
         # 绘制中心区域 (24x24像素)
-        center_zone_size = 24
+        center_zone_size = 32
         cv2.rectangle(display_img, 
                      (img_center[0] - center_zone_size, img_center[1] - center_zone_size),
                      (img_center[0] + center_zone_size, img_center[1] + center_zone_size),
