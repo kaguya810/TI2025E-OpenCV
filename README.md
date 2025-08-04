@@ -33,7 +33,7 @@ pip install opencv-python pyserial python-periphery numpy
 
 Arduino 端代码位于 `Arduino_Laseron/src/main.cpp`，使用 PlatformIO 编译并上传至开发板。
 
-## 优化建议
+## 计划修改
 
 1. `GPIO.py` 与 `PWM.py` 中的 sudo 调用和权限配置逻辑相似，可抽取为共用工具以减少重复。
 2. 多个主脚本体积较大，建议拆分为模块并补充单元测试，提升可维护性。
