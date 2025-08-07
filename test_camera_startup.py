@@ -38,19 +38,29 @@ def test_startup_image():
     
     print("  [模拟] 摄像头启动完成，开始检测...")
     
-    # Test camera reader module
+    # Test camera reader module (should NOT handle test images anymore)
     try:
         from include.camera_reader import CameraReader
         print("✓ CameraReader module can be imported")
         
+        # Verify that CameraReader no longer handles test images
+        import inspect
+        camera_source = inspect.getsource(CameraReader.__init__)
+        if 'camera_startup_test.jpg' not in camera_source:
+            print("✓ CameraReader correctly does NOT handle test images")
+        else:
+            print("❌ CameraReader still has test image logic (should be removed)")
+            return False
+        
         # Note: Won't actually initialize camera in headless environment
-        print("  [模拟] CameraReader 初始化完成")
+        print("  [模拟] CameraReader 初始化完成 (仅摄像头功能)")
         
     except Exception as e:
         print(f"⚠  Warning: CameraReader test failed: {e}")
         print("  This is expected in headless environment")
     
     print("=== Test completed successfully ===")
+    print("测试图片显示逻辑现在仅存在于GUI中，CameraReader只处理摄像头硬件")
     return True
 
 if __name__ == "__main__":
