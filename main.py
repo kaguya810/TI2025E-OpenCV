@@ -336,7 +336,18 @@ try:
 except:
     print("无法启动输入监听线程")
 
+# 在摄像头启动时显示测试图片
+test_image_path = "camera_startup_test.jpg"
+startup_image = cv2.imread(test_image_path)
+if startup_image is not None:
+    print("显示摄像头启动测试图片...")
+    cv2.imshow("Rectangle Detection (Press 'h' for help)", startup_image)
+    cv2.waitKey(1000)  # 显示1秒
+else:
+    print("警告：无法加载测试图片 " + test_image_path)
+
 # 初始化摄像头
+print("正在初始化摄像头...")
 capture = cv2.VideoCapture(0)
 if not capture.isOpened():
     print("无法访问摄像头！")
@@ -350,6 +361,16 @@ capture.set(cv2.CAP_PROP_AUTO_WB, 0)
 capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
 capture.set(cv2.CAP_PROP_EXPOSURE, -4)
 capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+# 等待摄像头稳定，继续显示测试图片
+print("摄像头参数设置完成，等待设备稳定...")
+for i in range(3):
+    if startup_image is not None:
+        cv2.imshow("Rectangle Detection (Press 'h' for help)", startup_image)
+        cv2.waitKey(500)
+    time.sleep(0.5)
+
+print("摄像头启动完成，开始检测...")
 
 # 性能监控
 frame_count = 0
