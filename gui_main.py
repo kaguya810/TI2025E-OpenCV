@@ -52,6 +52,7 @@ class CameraThread(QThread):
             # 在摄像头启动时显示测试图片
             test_image_path = "camera_startup_test.jpg"
             startup_image = cv2.imread(test_image_path)
+
             if startup_image is not None:
                 print("显示摄像头启动测试图片...")
                 # 发送测试图片以在GUI中显示
