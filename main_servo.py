@@ -12,7 +12,7 @@ from include.SerialCtrl import SerialComm
 from include.dect import RectangleDetector
 from include.PWM import ServoController
 from include.camera_reader import CameraReader
-from include.pid import PID, PIDParams,PIDController
+from include.pid import PID, PIDParams
 from include.display import DebugDisplay
 
 # 串口配置参数
@@ -208,11 +208,9 @@ PARAM_STEP = {
 if serial_comm.is_open():
     serial_comm.write(b'2;')  # 指示预备
 
-# 初始化多线程检测与PID控制类
+# 初始化多线程检测类 (PID控制改为单线程)
 rect_detector = RectangleDetector(detection_params)
 rect_detector.start()
-pid_controller = PIDController(pid_params)
-pid_controller.start()
 debug_display = DebugDisplay(detection_params, pid_params)
 
 # 主循环
@@ -284,9 +282,19 @@ try:
             offset_x = 0
             offset_y = 0
         # 更新PID参数（热更新，确保PID对象参数同步）
-        pid_controller.update_pid_params(pid_params)
-        pid_controller.update_offset((offset_x, offset_y))
-        pan_output, tilt_output = pid_controller.get_output()
+        pan_pid.set_params(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
+        tilt_pid.set_params(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
+        
+        # 直接计算PID输出
+        if filtered_point is not None:
+            pan_output = pan_pid.get_pid(offset_x, pid_params.output_scaler)
+            tilt_output = tilt_pid.get_pid(offset_y, pid_params.output_scaler)
+        else:
+            # 未检测到目标时重置PID控制器
+            pan_pid.reset()
+            tilt_pid.reset()
+            pan_output = 0
+            tilt_output = 0
         # 检查中心区域
         center_zone_size = 48
         in_center = filtered_point is not None and abs(offset_x) < center_zone_size and abs(offset_y) < center_zone_size
@@ -337,7 +345,6 @@ except Exception as e:
 
 finally:  # 收尾，确保资源释放
     rect_detector.stop()
-    pid_controller.stop()
     # 停止摄像头
     if 'camera_reader' in locals():
         camera_reader.stop()
