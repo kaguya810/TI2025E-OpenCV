@@ -10,10 +10,15 @@
 - 激光点射/连续控制逻辑，串口通信协议
 - 详细调试信息与可视化界面
 - Arduino 端激光与按键互锁程序
+- **🆕 PyQt5 图形用户界面** - 提供直观的参数调节和系统监控界面
 
 ## 目录结构
 - `main.py`：基础目标检测与串口输出 PID 控制量
 - `main_servo.py`：完整流程，集成摄像头、舵机、激光控制
+- **`gui_main.py`：🆕 PyQt5图形用户界面主程序**
+- **`start_gui.py`：🆕 GUI启动脚本（含环境检查）**
+- **`gui_demo.py`：🆕 GUI演示和测试脚本**
+- **`GUI_README.md`：🆕 GUI使用说明文档**
 - `include/`
   - `camera_reader.py`：摄像头多线程采集
   - `dect.py`：黑色矩形检测与中心点提取
@@ -30,13 +35,25 @@
 - numpy
 - collections
 - python-periphery（如需 GPIO/PWM 支持）
+- **PyQt5（GUI界面支持）**
 
 安装依赖：
 ```bash
-pip install opencv-python pyserial numpy python-periphery collections
+pip install opencv-python pyserial numpy python-periphery PyQt5
 ```
 
 ## 运行方式
+- **图形界面模式（推荐）：**
+  ```bash
+  # 环境检查和启动
+  python start_gui.py
+  
+  # 直接启动GUI
+  python gui_main.py
+  
+  # 演示和测试
+  python gui_demo.py
+  ```
 - 目标检测与串口输出：
   ```bash
   python main.py
