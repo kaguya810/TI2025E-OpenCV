@@ -1,10 +1,12 @@
-import cv2
-import time
-import threading
 import sys
+import threading
+import time
+from collections import deque
+
+import cv2
 import select
 import serial
-from collections import deque
+
 """ 以下是自建包，存放于include目录下 """
 from include.SerialCtrl import SerialComm
 from include.dect import RectangleDetector
@@ -118,8 +120,7 @@ def control_servos(pan_output, tilt_output, detected):
             # 垂直舵机保持当前值
         else:
             # 反转逻辑：pan_output正负方向取反
-            pan_dir = -1 if fanzhuan else 1
-            pan_value = int(PAN_CENTER - pan_output * 0.5 * pan_dir)
+            pan_value = int(PAN_CENTER - pan_output * 0.5)
             pan_value = max(PAN_MIN, min(PAN_MAX, pan_value))
             tilt_value = int(tilt_value - tilt_output * 0.2)
             tilt_value = max(TILT_MIN, min(TILT_MAX, tilt_value))
@@ -214,8 +215,9 @@ pid_controller = PIDController(pid_params)
 pid_controller.start()
 debug_display = DebugDisplay(detection_params, pid_params)
 
+# 主循环
 try:
-    while not stop_sending:
+    while not stop_sending:  # 循环直到收到停止信号
         # 检查串口信号（非阻塞方式）
         serial_comm.read_all()
         # 检查start1信号
@@ -332,7 +334,8 @@ try:
             send_counter = 0
 except Exception as e:
     print(f"运行时错误: {e}")
-finally:
+
+finally:  # 收尾，确保资源释放
     rect_detector.stop()
     pid_controller.stop()
     # 停止摄像头
@@ -343,6 +346,7 @@ finally:
     # 释放舵机
     controller.servo_release(servonum=3)
     controller.servo_release(servonum=4)
+    print("舵机已释放")
     
     # 确保激光关闭
     if laser_active and serial_comm.is_open():
@@ -351,5 +355,4 @@ finally:
     
     # 关闭串口
     serial_comm.close()
-    print("舵机已释放")
     print("程序已退出")
