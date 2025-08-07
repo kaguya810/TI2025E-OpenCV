@@ -1,6 +1,5 @@
 import time
 from math import pi, isnan
-import threading
 
 # PID控制器参数
 class PIDParams:
@@ -42,6 +41,13 @@ class PID:
         self._last_error = 0.0
         self._last_derivative = float('nan')
         self._last_t = 0
+    
+    def set_params(self, p, i, d, imax):
+        """设置PID参数"""
+        self._kp = float(p)
+        self._ki = float(i)
+        self._kd = float(d)
+        self._imax = abs(imax)
     
     def get_pid(self, error, scaler=1.0):
         """
@@ -108,29 +114,32 @@ class PIDController:
         self.pid_params = pid_params
         self.offset = (0, 0)
         self.output = (0, 0)
-        self.running = False
-        self.lock = threading.Lock()
-        self.thread = threading.Thread(target=self._run, daemon=True)
         self.pan_pid = PID(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
         self.tilt_pid = PID(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
 
     def start(self):
-        self.running = True
-        self.thread.start()
+        """启动PID控制器 - 现在是同步版本，此方法保持兼容性"""
+        pass
 
     def stop(self):
-        self.running = False
-        self.thread.join()
+        """停止PID控制器 - 现在是同步版本，此方法保持兼容性"""
+        pass
 
     def update_offset(self, offset):
-        with self.lock:
-            self.offset = offset
+        """更新偏移量并立即计算PID输出"""
+        self.offset = offset
+        # 立即计算PID输出
+        offset_x, offset_y = offset
+        pan_output = self.pan_pid.get_pid(offset_x, self.pid_params.output_scaler)
+        tilt_output = self.tilt_pid.get_pid(offset_y, self.pid_params.output_scaler)
+        self.output = (pan_output, tilt_output)
 
     def get_output(self):
-        with self.lock:
-            return self.output
+        """获取当前PID输出"""
+        return self.output
 
     def reset(self):
+        """重置PID控制器"""
         self.pan_pid.reset()
         self.tilt_pid.reset()
 
@@ -139,13 +148,3 @@ class PIDController:
         self.pid_params = pid_params
         self.pan_pid.set_params(pid_params.pan_kp, pid_params.pan_ki, pid_params.pan_kd, pid_params.pan_imax)
         self.tilt_pid.set_params(pid_params.tilt_kp, pid_params.tilt_ki, pid_params.tilt_kd, pid_params.tilt_imax)
-
-    def _run(self):
-        while self.running:
-            with self.lock:
-                offset_x, offset_y = self.offset
-            pan_output = self.pan_pid.get_pid(offset_x, self.pid_params.output_scaler)
-            tilt_output = self.tilt_pid.get_pid(offset_y, self.pid_params.output_scaler)
-            with self.lock:
-                self.output = (pan_output, tilt_output)
-            time.sleep(0.01)
