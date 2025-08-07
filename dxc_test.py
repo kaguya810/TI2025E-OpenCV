@@ -1,6 +1,6 @@
 import time
 import cv2
-from camera_reader import CameraReader
+from include.camera_reader import CameraReader
 max_fps=60
 def main():
     cam = CameraReader(cam_id=0, width=640, height=480, max_fps=60)

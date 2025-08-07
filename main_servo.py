@@ -1,14 +1,17 @@
 import cv2
-import numpy as np
 import time
 import threading
 import sys
 import select
 import serial
 from collections import deque
-from PWM import ServoController
-from camera_reader import CameraReader
+""" 以下是自建包，存放于include目录下 """
+from include.SerialCtrl import SerialComm
+from include.dect import RectangleDetector
+from include.PWM import ServoController
+from include.camera_reader import CameraReader
 from include.pid import PID, PIDParams,PIDController
+from include.display import DebugDisplay
 
 # 串口配置参数
 SERIAL_PORT = '/dev/ttyUSB0'  # 根据实际设备修改
@@ -19,7 +22,7 @@ START3_SIGNAL = b'start3'  # 开始控制信号3（激光连续模式）
 LASER_ON_SIGNAL = b'1;'    # 激光开启信号
 LASER_OFF_SIGNAL = b'0;'   # 激光关闭信号
 
-tilt_value = 700  # 垂直舵机初始值
+tilt_value = 600  # 垂直舵机初始值
 
 # 可调检测参数
 class DetectionParams:
@@ -36,204 +39,6 @@ class DetectionParams:
 
 detection_params = DetectionParams()
 pid_params = PIDParams()
-
-class DebugDisplay:
-    def __init__(self, detection_params, pid_params):
-        self.detection_params = detection_params
-        self.pid_params = pid_params
-        self.show_params = False
-        self.trail_image = None
-        self.fps = 0
-        self.avg_process_time = 0
-        self.in_center_zone = False
-        self.center_stay_timer = 0
-
-    def update(self, fps, avg_process_time, in_center_zone, center_stay_timer):
-        self.fps = fps
-        self.avg_process_time = avg_process_time
-        self.in_center_zone = in_center_zone
-        self.center_stay_timer = center_stay_timer
-
-    def draw(self, display_img, img_center, filtered_point, contour, control_enabled, laser_active, current_mode):
-        # 性能信息
-        cv2.putText(display_img, f"FPS: {self.fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(display_img, f"Proc: {self.avg_process_time:.1f}ms", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        control_status = "CTRL: " + ("ON" if control_enabled else "OFF")
-        cv2.putText(display_img, control_status, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if control_enabled else (0, 0, 255), 2)
-        laser_status = "LASER: " + ("ON" if laser_active else "OFF")
-        cv2.putText(display_img, laser_status, (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if laser_active else (0, 0, 255), 2)
-        mode_status = f"MODE: {current_mode}"
-        cv2.putText(display_img, mode_status, (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
-        if self.in_center_zone:
-            stay_time = time.time() - self.center_stay_timer
-            cv2.putText(display_img, f"Stay: {stay_time:.1f}s", (10, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        if self.show_params:
-            y_offset = 210
-            cv2.putText(display_img, f"Min Area: {self.detection_params.min_area}", (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
-            cv2.putText(display_img, f"Min Rect: {self.detection_params.min_rectangularity:.2f}", (10, y_offset+25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
-            cv2.putText(display_img, f"Max Aspect: {self.detection_params.max_aspect_ratio:.1f}", (10, y_offset+50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
-            cv2.putText(display_img, f"Dist Weight: {self.detection_params.distance_weight:.1f}", (10, y_offset+75), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
-            cv2.putText(display_img, f"Pan Kp: {self.pid_params.pan_kp:.3f}", (10, y_offset+100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
-            cv2.putText(display_img, f"Pan Ki: {self.pid_params.pan_ki:.3f}", (10, y_offset+125), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
-            cv2.putText(display_img, f"Pan Kd: {self.pid_params.pan_kd:.3f}", (10, y_offset+150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
-            cv2.putText(display_img, f"Tilt Kp: {self.pid_params.tilt_kp:.3f}", (10, y_offset+175), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
-            cv2.putText(display_img, f"Tilt Ki: {self.pid_params.tilt_ki:.3f}", (10, y_offset+200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
-            cv2.putText(display_img, f"Tilt Kd: {self.pid_params.tilt_kd:.3f}", (10, y_offset+225), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 0, 200), 1)
-        # 绘制中心点和区域
-        cv2.circle(display_img, img_center, 5, (0, 0, 255), -1)
-        center_zone_size = 48
-        cv2.rectangle(display_img, (img_center[0] - center_zone_size, img_center[1] - center_zone_size), (img_center[0] + center_zone_size, img_center[1] + center_zone_size), (0, 255, 255), 1)
-        # 轨迹与目标
-        if filtered_point is not None:
-            if self.trail_image is None or self.trail_image.shape != display_img.shape:
-                self.trail_image = np.zeros_like(display_img)
-            cv2.circle(self.trail_image, filtered_point, 2, (0, 255, 255), -1)
-            display_img = cv2.add(display_img, self.trail_image)
-            cv2.circle(display_img, filtered_point, 8, (255, 0, 0), -1)
-            text = f"({filtered_point[0]}, {filtered_point[1]})"
-            cv2.putText(display_img, text, (filtered_point[0] + 10, filtered_point[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-            cv2.line(display_img, img_center, filtered_point, (0, 255, 0), 1)
-            if contour is not None:
-                cv2.drawContours(display_img, [contour], -1, (0, 255, 0), 2)
-        return display_img
-
-class SerialComm:
-    def __init__(self, port, baudrate, timeout=0.1):
-        self.port = port
-        self.baudrate = baudrate
-        self.timeout = timeout
-        self.ser = None
-        self.buffer = bytearray()
-        self._init_serial()
-
-    def _init_serial(self):
-        try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
-            print(f"串口初��化成功: {self.port}")
-        except Exception as e:
-            print(f"串口初始化失败: {e}")
-            self.ser = None
-
-    def is_open(self):
-        return self.ser is not None and self.ser.is_open
-
-    def write(self, cmd):
-        try:
-            if self.is_open():
-                self.ser.write(cmd)
-        except Exception as e:
-            print(f"串口写入异常: {e}")
-
-    def read_all(self):
-        if self.is_open() and self.ser.in_waiting > 0:
-            data = self.ser.read(self.ser.in_waiting)
-            self.buffer.extend(data)
-            return data
-        return b''
-
-    def check_signal(self, signal):
-        if signal in self.buffer:
-            index = self.buffer.find(signal)
-            self.buffer = self.buffer[index + len(signal):]
-            return True
-        return False
-
-    def clear_buffer(self):
-        self.buffer.clear()
-
-    def close(self):
-        if self.is_open():
-            self.ser.close()
-            print("串口已关闭")
-
-class RectangleDetector:
-    def __init__(self, detection_params):
-        self.detection_params = detection_params
-        self.frame = None
-        self.result = (None, None)
-        self.running = False
-        self.lock = threading.Lock()
-        self.thread = threading.Thread(target=self._run, daemon=True)
-
-    def start(self):
-        self.running = True
-        self.thread.start()
-
-    def stop(self):
-        self.running = False
-        self.thread.join()
-
-    def update_frame(self, frame):
-        with self.lock:
-            self.frame = frame.copy()
-
-    def get_result(self):
-        with self.lock:
-            return self.result
-
-    def _run(self):
-        prev_center = None
-        while self.running:
-            with self.lock:
-                frame = self.frame.copy() if self.frame is not None else None
-            if frame is None:
-                time.sleep(0.01)
-                continue
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.GaussianBlur(gray, (self.detection_params.gaussian_blur_size, self.detection_params.gaussian_blur_size), 0)
-            center, contour = find_black_rectangle_center(gray, prev_center, self.detection_params)
-            with self.lock:
-                self.result = (center, contour)
-            prev_center = center
-            time.sleep(0.01)
-
-def find_black_rectangle_center(thresh, prev_center, detection_params):
-    adaptive_thresh = cv2.adaptiveThreshold(
-        thresh, 255, 
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-        cv2.THRESH_BINARY_INV, 
-        detection_params.adaptive_block_size, 
-        detection_params.adaptive_c
-    )
-    kernel = np.ones((detection_params.morph_kernel_size, detection_params.morph_kernel_size), np.uint8)
-    morphed = cv2.morphologyEx(adaptive_thresh, cv2.MORPH_CLOSE, kernel)
-    morphed = cv2.dilate(morphed, kernel, iterations=1)
-    contours, _ = cv2.findContours(morphed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None, None
-    best_contour = None
-    max_score = 0
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < detection_params.min_area:
-            continue
-        rect = cv2.minAreaRect(cnt)
-        width, height = rect[1]
-        if min(width, height) == 0:
-            continue
-        aspect_ratio = max(width, height) / min(width, height)
-        rectangularity = area / (width * height)
-        if aspect_ratio > detection_params.max_aspect_ratio:
-            continue
-        if rectangularity < detection_params.min_rectangularity:
-            continue
-        score = area + rectangularity * 100 + (1 / aspect_ratio) * 50
-        if prev_center:
-            M = cv2.moments(cnt)
-            if M["m00"] != 0:
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
-                distance = np.sqrt((cX - prev_center[0])**2 + (cY - prev_center[1])**2)
-                distance_score = max(0, 100 - distance) * detection_params.distance_weight
-                score += distance_score
-        if score > max_score:
-            max_score = score
-            best_contour = cnt
-    if best_contour is None:
-        return None, None
-    rect = cv2.minAreaRect(best_contour)
-    center = (int(rect[0][0]), int(rect[0][1]))
-    return center, best_contour
 
 # 全局变量
 stop_sending = False

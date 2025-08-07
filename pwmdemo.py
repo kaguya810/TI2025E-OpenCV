@@ -1,4 +1,4 @@
-from PWM import ServoController
+from include.PWM import ServoController
 import time
 
 # 创建 ServoController 实例
