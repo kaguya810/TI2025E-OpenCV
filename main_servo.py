@@ -5,7 +5,6 @@ from collections import deque
 
 import cv2
 import select
-import serial
 
 """ 以下是自建包，存放于include目录下 """
 from include.SerialCtrl import SerialComm

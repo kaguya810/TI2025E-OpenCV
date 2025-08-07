@@ -5,27 +5,22 @@ PyQt5 GUI for TI2025E-OpenCV Servo/Laser Control System
 """
 
 import sys
-import threading
 import time
-from collections import deque
 
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QGridLayout, QLabel, QPushButton, 
-                             QSlider, QSpinBox, QDoubleSpinBox, QGroupBox,
-                             QComboBox, QCheckBox, QTextEdit, QSplitter,
-                             QFrame, QSizePolicy)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
 from PyQt5.QtGui import QImage, QPixmap, QFont
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QGridLayout, QLabel, QPushButton,
+                             QSpinBox, QDoubleSpinBox, QGroupBox,
+                             QComboBox, QTextEdit, QSplitter)
 
 # 导入项目模块
 from include.SerialCtrl import SerialComm
-from include.dect import RectangleDetector, find_black_rectangle_center
-from include.PWM import ServoController
 from include.camera_reader import CameraReader
-from include.pid import PID, PIDParams, PIDController
-from include.display import DebugDisplay
+from include.dect import find_black_rectangle_center
+from include.pid import PIDParams, PIDController
 
 
 # 检测参数类
@@ -363,21 +358,40 @@ class MainWindow(QMainWindow):
         
         # 左侧：视频显示
         left_splitter = QSplitter(Qt.Vertical)
-        
-        # 视频显示区域
-        self.video_label = QLabel("等待摄像头启动...")
-        self.video_label.setMinimumSize(640, 480)
-        self.video_label.setStyleSheet("border: 2px solid gray;")
-        self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setScaledContents(True)
-        left_splitter.addWidget(self.video_label)
-        
-        # 日志显示区域
+
+        # 首先创建日志显示区域
         self.log_text = QTextEdit()
         self.log_text.setMaximumHeight(150)
         self.log_text.setPlaceholderText("系统日志将在这里显示...")
         left_splitter.addWidget(self.log_text)
-        
+
+        # 视频显示区域 - 使用更友好的欢迎信息
+        self.video_label = QLabel("正在启动系统...\n请稍候")
+        self.video_label.setMinimumSize(640, 480)
+        self.video_label.setStyleSheet(
+            "border: 2px solid gray; background-color: #2F2F2F; color: white; font-size: 24px;")
+        self.video_label.setAlignment(Qt.AlignCenter)
+        self.video_label.setScaledContents(True)
+        left_splitter.insertWidget(0, self.video_label)  # 插入到日志组件之前
+
+        # 尝试立即显示测试图片
+        try:
+            test_image_path = "camera_startup_test.jpg"
+            startup_image = cv2.imread(test_image_path)
+            if startup_image is not None:
+                rgb_image = cv2.cvtColor(startup_image, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgb_image.shape
+                bytes_per_line = ch * w
+                qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                pixmap = QPixmap.fromImage(qt_image)
+                scaled_pixmap = pixmap.scaled(self.video_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.video_label.setPixmap(scaled_pixmap)
+                self.log_message("已加载启动测试图片")
+            else:
+                self.log_message("警告：无法加载测试图片 " + test_image_path)
+        except Exception as e:
+            self.log_message(f"加载测试图片时出错: {e}")
+
         # 右侧：控制面板
         right_widget = QWidget()
         right_layout = QVBoxLayout()

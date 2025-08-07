@@ -1,8 +1,8 @@
-from periphery import PWM
-import time
-import subprocess
+# from periphery import PWM
 import os
+import subprocess
 import sys
+import time
 
 # 常量：舵机PWM参数&权限配置
 SERVO_PERIOD_NS = 20_000_000  # 50Hz = 20ms
@@ -105,8 +105,8 @@ class ServoController:
                     print("尝试使用 sudo 权限重新运行...")
                     self.rerun_with_sudo()
                     return
-                
-                pwm = PWM(chip=servonum, channel=0)
+
+                #pwm = PWM(chip=servonum, channel=0)
                 pwm.frequency = 1 / (SERVO_PERIOD_NS * 1e-9)  # 50Hz
                 pwm.duty_cycle = duty_cycle
                 pwm.polarity = "normal"
