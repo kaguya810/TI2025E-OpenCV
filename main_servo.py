@@ -151,7 +151,7 @@ def laser_control_logic():
                     serial_comm.write(LASER_OFF_SIGNAL)
                     print("发送激光关闭指令")
                 laser_active = False
-                current_mode = "start1"
+                current_mode = "idle"  # 关闭激光后状态切换为idle
                 laser_sent = False
                 serial_comm.clear_buffer()
 
