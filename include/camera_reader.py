@@ -3,17 +3,6 @@ import threading
 
 class CameraReader:
     def __init__(self, cam_id=0, width=1280, height=720, max_fps=30, settings=None):
-        # 在摄像头启动时显示测试图片（如果运行在独立模式）
-        import os
-        test_image_path = "camera_startup_test.jpg"
-        if os.path.exists(test_image_path):
-            print("CameraReader: 加载摄像头启动测试图片...")
-            startup_image = cv2.imread(test_image_path)
-            if startup_image is not None:
-                print("CameraReader: 测试图片加载成功")
-            else:
-                print("CameraReader: 警告 - 无法加载测试图片")
-        
         print("CameraReader: 正在初始化摄像头...")
         self.cap = cv2.VideoCapture(cam_id, cv2.CAP_V4L2)
         if not self.cap.isOpened():
