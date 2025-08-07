@@ -28,11 +28,12 @@
 - OpenCV
 - pyserial
 - numpy
+- collections
 - python-periphery（如需 GPIO/PWM 支持）
 
 安装依赖：
 ```bash
-pip install opencv-python pyserial numpy python-periphery
+pip install opencv-python pyserial numpy python-periphery collections
 ```
 
 ## 运行方式
