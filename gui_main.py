@@ -54,15 +54,34 @@ class CameraThread(QThread):
     
     def run(self):
         try:
+            # 在摄像头启动时显示测试图片
+            test_image_path = "camera_startup_test.jpg"
+            startup_image = cv2.imread(test_image_path)
+            if startup_image is not None:
+                print("显示摄像头启动测试图片...")
+                # 发送测试图片以在GUI中显示
+                self.frameReady.emit(startup_image)
+                self.msleep(1000)  # 显示1秒
+            else:
+                print("警告：无法加载测试图片 " + test_image_path)
+            
+            print("正在初始化摄像头...")
             self.camera_reader = CameraReader(self.cam_id)
-            self.camera_reader.start()
             self.running = True
             
+            # 摄像头启动稳定期间继续显示测试图片
+            print("摄像头参数设置完成，等待设备稳定...")
+            for i in range(3):
+                if startup_image is not None:
+                    self.frameReady.emit(startup_image)
+                self.msleep(500)
+            
+            print("摄像头启动完成，开始实时采集...")
+            
             while self.running:
-                if self.camera_reader.ret:
-                    frame = self.camera_reader.get_frame()
-                    if frame is not None:
-                        self.frameReady.emit(frame)
+                ret, frame = self.camera_reader.read()
+                if ret and frame is not None:
+                    self.frameReady.emit(frame)
                 self.msleep(33)  # ~30fps
                 
         except Exception as e:
