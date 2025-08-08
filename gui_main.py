@@ -333,7 +333,7 @@ class MainWindow(QMainWindow):
             print(f"无法设置窗口图标: {e}")
 
         self.setWindowTitle("TI2025E-OpenCV 舵机激光控制系统")
-        self.setGeometry(100, 100, 1400, 900)
+        self.setGeometry(100, 100, 950, 780)
         
         # 系统组件
         self.camera_thread = None
