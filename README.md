@@ -41,7 +41,7 @@
 ```bash
 pip install opencv-python pyserial numpy python-periphery PyQt5
 ```
-
+另需 PlatformIO（推荐）或 Arduino IDE烧录Arduino开发板
 ## 运行方式
 - **图形界面模式（推荐）：**
   ```bash
@@ -74,7 +74,6 @@ pip install opencv-python pyserial numpy python-periphery PyQt5
 ## 注意事项
 - 需在 Linux 下运行，访问 GPIO/PWM 需 sudo 权限
 - 串口端口、舵机参数等请根据实际硬件环境修改
-- 建议使用 PlatformIO 上传 Arduino 端代码
 
 ## 推荐改进
 1. GPIO/PWM 权限与 sudo 逻辑可抽象为共用工具
